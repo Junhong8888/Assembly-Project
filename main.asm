@@ -8,6 +8,14 @@ Shoe STRUCT
     shoePrice    DWORD ?
 Shoe ENDS
 
+; Purchase Record data type definition
+PurchaseRecord STRUCT
+    transactionID DWORD ?
+    totalAmount   DWORD ?   ; In Cents
+    paymentType   DWORD ?   ; 1=Cash, 2=Card, 3=QR
+    itemCount     DWORD ?   ; Total shoe pairs purchased
+PurchaseRecord ENDS
+
 ; Payment Method Constants
 CASH = 1
 CARD = 2
@@ -39,24 +47,44 @@ CENT = 100
     ; ==========================================
     ; UI Strings & Menus
     ; ==========================================
-    mainTitle    BYTE "==============================", 0dh, 0ah
-                 BYTE "    POS SYSTEM LOGIN GATEWAY   ", 0dh, 0ah
-                 BYTE "==============================", 0dh, 0ah, 0
+    mainTitle    BYTE "==========================================", 0dh, 0ah
+                 BYTE "        POS SYSTEM MAIN GATEWAY           ", 0dh, 0ah
+                 BYTE "==========================================", 0dh, 0ah, 0
                  
-    mainOpt      BYTE "1. Manager Login", 0dh, 0ah
+    mainOpt      BYTE "1. Login (Manager / Staff / Member)", 0dh, 0ah
+                 BYTE "2. Register New Account", 0dh, 0ah
+                 BYTE "3. Guest Access", 0dh, 0ah
+                 BYTE "4. Exit System", 0dh, 0ah
+                 BYTE "Select Option (1-4): ", 0
+
+    loginTitle   BYTE "==========================================", 0dh, 0ah
+                 BYTE "              LOGIN PORTAL                ", 0dh, 0ah
+                 BYTE "==========================================", 0dh, 0ah, 0
+
+    loginOpt     BYTE "1. Manager Login", 0dh, 0ah
                  BYTE "2. Staff Login", 0dh, 0ah
                  BYTE "3. Member Login", 0dh, 0ah
-                 BYTE "4. Guest", 0dh, 0ah
-                 BYTE "5. Exit", 0dh, 0ah
-                 BYTE "Select Login Type (1-5): ", 0
+                 BYTE "4. Back to Main Gateway", 0dh, 0ah
+                 BYTE "Select Login Role (1-4): ", 0
+
+    regMenuTitle BYTE "==========================================", 0dh, 0ah
+                 BYTE "          REGISTRATION PORTAL             ", 0dh, 0ah
+                 BYTE "==========================================", 0dh, 0ah, 0
+
+    regMenuOpt   BYTE "1. Register Admin / Manager", 0dh, 0ah
+                 BYTE "2. Register Staff", 0dh, 0ah
+                 BYTE "3. Register Member", 0dh, 0ah
+                 BYTE "4. Back to Main Gateway", 0dh, 0ah
+                 BYTE "Select Account Type to Register (1-4): ", 0
 
     mgrMenuTitle BYTE "==============================", 0dh, 0ah
                  BYTE "      MANAGER DASHBOARD        ", 0dh, 0ah
                  BYTE "==============================", 0dh, 0ah, 0
     mgrMenuOpt   BYTE "1. Register New Staff", 0dh, 0ah
                  BYTE "2. Register New Member", 0dh, 0ah
-                 BYTE "3. Logout", 0dh, 0ah
-                 BYTE "Select Option (1-3): ", 0
+                 BYTE "3. View Sales Report", 0dh, 0ah
+                 BYTE "4. Logout", 0dh, 0ah
+                 BYTE "Select Option (1-4): ", 0
 
     staffTitle   BYTE "==============================", 0dh, 0ah
                  BYTE "        STAFF DASHBOARD        ", 0dh, 0ah
@@ -86,8 +114,8 @@ CENT = 100
     ; ==========================================
     ; Database (RAM-based Credentials)
     ; ==========================================
-    mgrUser      BYTE "manager", 0     
-    mgrPass      BYTE "123", 0     
+    mgrUser      BYTE "manager", 23 DUP(0) 
+    mgrPass      BYTE "123", 27 DUP(0)     
 
     staffUser    BYTE "staff", 25 DUP(0) 
     staffPass    BYTE "123", 27 DUP(0)
@@ -101,6 +129,28 @@ CENT = 100
     inChoice     BYTE 10 DUP(0)  
     inUser       BYTE 30 DUP(0)
     inPass       BYTE 30 DUP(0)
+
+    ; ==========================================
+    ; Purchase History Storage
+    ; ==========================================
+    MAX_SALES    = 50
+    salesHistory PurchaseRecord MAX_SALES DUP(<0,0,0,0>)
+    salesCount   DWORD 0
+
+    ; ==========================================
+    ; Report Interface Strings
+    ; ==========================================
+    reportTitle  BYTE "========================================================", 13, 10
+                 BYTE "              ADMIN DASHBOARD - SALES REPORT            ", 13, 10
+                 BYTE "========================================================", 13, 10, 0
+    repHeader    BYTE "TX Qty    Payment     Amount     ", 13, 10
+                 BYTE "--------------------------------------------------------", 13, 10, 0
+    repNoSales   BYTE "No transaction records found.", 13, 10, 0
+    repTotalTx   BYTE 13, 10, "Total Transactions Processed : ", 0
+    repTotalRev  BYTE 13, 10, "Total Revenue Collected      : RM", 0
+    repCashCount BYTE 13, 10, "Cash Transactions            : ", 0
+    repCardCount BYTE 13, 10, "Card Transactions            : ", 0
+    repQRCount   BYTE 13, 10, "QR Code Transactions         : ", 0
     
     ; ==========================================
     ; Product and Catalog Module
@@ -335,7 +385,7 @@ SelectTheme ENDP
 
 
 ; ==========================================
-; 2. MAIN LOGIN GATEWAY PROCEDURE
+; 2. MAIN LOGIN / REGISTER GATEWAY
 ; ==========================================
 MainGateway PROC
 GatewayStart:
@@ -360,14 +410,12 @@ GatewayStart:
 
     mov al, inChoice[0]
     cmp al, '1'
-    je DoMgrLogin
+    je ShowLoginPortal
     cmp al, '2'
-    je DoStaffLogin
+    je ShowRegisterPortal
     cmp al, '3'
-    je DoMemLogin
-    cmp al, '4'
     je DoGuestLogin
-    cmp al, '5'
+    cmp al, '4'
     je ExitGateway
 
 GatewayInvalid:
@@ -378,42 +426,12 @@ GatewayInvalid:
     call WaitMsg
     jmp GatewayStart
 
-DoMgrLogin:
-    mov isMemberUser, 0
-    mov esi, OFFSET mgrUser
-    mov edi, OFFSET mgrPass
-    call PerformLogin
-    cmp eax, 1
-    jne GatewayStart
-    call ManagerDashboard
+ShowLoginPortal:
+    call LoginPortal
     jmp GatewayStart
 
-DoStaffLogin:
-    mov isMemberUser, 0
-    mov esi, OFFSET staffUser
-    mov edi, OFFSET staffPass
-    call PerformLogin
-    cmp eax, 1
-    jne GatewayStart
-    call StaffDashboard
-    jmp GatewayStart
-
-DoMemLogin:
-    mov isMemberUser, 1
-    mov esi, OFFSET memUser
-    mov edi, OFFSET memPass
-    call PerformLogin
-    cmp eax, 1
-    jne GatewayStart
-    mov eax, currentTheme
-    call SetTextColor
-    mov edx, OFFSET msgMemSucc
-    call WriteString
-    call Crlf
-    call WaitMsg
-    call ClearCart
-    call getInput
-    call PaymentReceiptModule
+ShowRegisterPortal:
+    call RegisterPortal
     jmp GatewayStart
 
 DoGuestLogin:
@@ -435,7 +453,149 @@ MainGateway ENDP
 
 
 ; ==========================================
-; 3. UNIFIED LOGIN PROCEDURE
+; 3. LOGIN PORTAL MENU
+; ==========================================
+LoginPortal PROC
+LoginStart:
+    mov eax, currentTheme
+    call SetTextColor
+    call Clrscr
+    
+    mov edx, OFFSET loginTitle
+    call WriteString
+    mov edx, OFFSET loginOpt
+    call WriteString
+
+    mov edx, OFFSET inChoice
+    mov ecx, SIZEOF inChoice
+    call ReadString
+    cmp eax, 1
+    jne LoginInvalid
+
+    mov al, inChoice[0]
+    cmp al, '1'
+    je DoMgrLogin
+    cmp al, '2'
+    je DoStaffLogin
+    cmp al, '3'
+    je DoMemLogin
+    cmp al, '4'
+    je ExitLoginPortal
+
+LoginInvalid:
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgErrC
+    call WriteString
+    call WaitMsg
+    jmp LoginStart
+
+DoMgrLogin:
+    mov isMemberUser, 0
+    mov esi, OFFSET mgrUser
+    mov edi, OFFSET mgrPass
+    call PerformLogin
+    cmp eax, 1
+    jne LoginStart
+    call ManagerDashboard
+    jmp LoginStart
+
+DoStaffLogin:
+    mov isMemberUser, 0
+    mov esi, OFFSET staffUser
+    mov edi, OFFSET staffPass
+    call PerformLogin
+    cmp eax, 1
+    jne LoginStart
+    call StaffDashboard
+    jmp LoginStart
+
+DoMemLogin:
+    mov isMemberUser, 1
+    mov esi, OFFSET memUser
+    mov edi, OFFSET memPass
+    call PerformLogin
+    cmp eax, 1
+    jne LoginStart
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgMemSucc
+    call WriteString
+    call Crlf
+    call WaitMsg
+    call ClearCart
+    call getInput
+    call PaymentReceiptModule
+    jmp LoginStart
+
+ExitLoginPortal:
+    ret
+LoginPortal ENDP
+
+
+; ==========================================
+; 4. REGISTER PORTAL MENU (PUBLIC ACCESSIBLE)
+; ==========================================
+RegisterPortal PROC
+RegStart:
+    mov eax, currentTheme
+    call SetTextColor
+    call Clrscr
+    
+    mov edx, OFFSET regMenuTitle
+    call WriteString
+    mov edx, OFFSET regMenuOpt
+    call WriteString
+
+    mov edx, OFFSET inChoice
+    mov ecx, SIZEOF inChoice
+    call ReadString
+    cmp eax, 1
+    jne RegInvalid
+
+    mov al, inChoice[0]
+    cmp al, '1'
+    je RegAdminPublic
+    cmp al, '2'
+    je RegStaffPublic
+    cmp al, '3'
+    je RegMemberPublic
+    cmp al, '4'
+    je ExitRegPortal
+
+RegInvalid:
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgErrC
+    call WriteString
+    call WaitMsg
+    jmp RegStart
+
+RegAdminPublic:
+    mov esi, OFFSET mgrUser
+    mov edi, OFFSET mgrPass
+    call RegisterAccount
+    jmp RegStart
+
+RegStaffPublic:
+    mov esi, OFFSET staffUser
+    mov edi, OFFSET staffPass
+    call RegisterAccount
+    jmp RegStart
+
+RegMemberPublic:
+    mov esi, OFFSET memUser
+    mov edi, OFFSET memPass
+    call RegisterAccount
+    jmp RegStart
+
+ExitRegPortal:
+    ret
+RegisterPortal ENDP
+
+
+; ==========================================
+; 5. UNIFIED LOGIN PROCEDURE
 ; ==========================================
 PerformLogin PROC
     LOCAL pUser:DWORD, pPass:DWORD
@@ -545,7 +705,7 @@ PerformLogin ENDP
 
 
 ; ==========================================
-; 4. MANAGER DASHBOARD PROCEDURE
+; 6. MANAGER DASHBOARD PROCEDURE
 ; ==========================================
 ManagerDashboard PROC
 MgrStart:
@@ -570,6 +730,8 @@ MgrStart:
     cmp al, '2'
     je RegMemMgr
     cmp al, '3'
+    je ShowReport
+    cmp al, '4'
     je MgrExit
 
 MgrInvalid:
@@ -592,13 +754,17 @@ RegMemMgr:
     call RegisterAccount
     jmp MgrStart
 
+ShowReport:
+    call GenerateSalesReport
+    jmp MgrStart
+
 MgrExit:
     ret
 ManagerDashboard ENDP
 
 
 ; ==========================================
-; 5. STAFF DASHBOARD PROCEDURE
+; 7. STAFF DASHBOARD PROCEDURE
 ; ==========================================
 StaffDashboard PROC
 StaffStart:
@@ -643,7 +809,7 @@ StaffDashboard ENDP
 
 
 ; ==========================================
-; 6. ACCOUNT REGISTRATION PROCEDURE
+; 8. ACCOUNT REGISTRATION PROCEDURE
 ; ==========================================
 RegisterAccount PROC
     LOCAL pTargetUser:DWORD, pTargetPass:DWORD
@@ -723,7 +889,7 @@ RegisterAccount ENDP
 
 
 ; ==========================================
-; 7. HELPER: CHECK DUPLICATE USERNAME
+; 9. HELPER: CHECK DUPLICATE USERNAME
 ; ==========================================
 CheckDuplicateUser PROC
     mov esi, OFFSET inUser
@@ -759,7 +925,7 @@ CheckDuplicateUser ENDP
 
 
 ; ==========================================
-; 8. HELPER: STRING COMPARE
+; 10. HELPER: STRING COMPARE
 ; ==========================================
 StringCompare PROC
 CompareLoop:
@@ -783,7 +949,7 @@ StringCompare ENDP
 
 
 ; ==========================================
-; 9. HELPER: STRING COPY
+; 11. HELPER: STRING COPY
 ; ==========================================
 StringCopy PROC
 CopyLoop:
@@ -800,7 +966,7 @@ StringCopy ENDP
 
 
 ; ==========================================
-; 10. HELPER: CLEAR CART BETWEEN TRANSACTIONS
+; 12. HELPER: CLEAR CART BETWEEN TRANSACTIONS
 ; ==========================================
 ClearCart PROC
     mov esi, OFFSET shoeCart
@@ -815,7 +981,7 @@ ClearCart ENDP
 
 
 ; ==========================================
-; 11. GET USER INPUT (SALES MODULE)
+; 13. GET USER INPUT (SALES MODULE)
 ; ==========================================
 getInput PROC
 
@@ -917,7 +1083,7 @@ getInput ENDP
 
 
 ; ==========================================
-; 12. DISPLAY PRODUCT CATALOG
+; 14. DISPLAY PRODUCT CATALOG
 ; ==========================================
 displayCatalog PROC
     mov eax, currentTheme
@@ -968,7 +1134,7 @@ displayCatalog ENDP
 
 
 ; ==========================================
-; 13. CALCULATE PRICE
+; 15. CALCULATE PRICE
 ; ==========================================
 calcPrice PROC
     mov ebx, id
@@ -990,7 +1156,7 @@ calcPrice ENDP
 
 
 ; ==========================================
-; 14. ADD TO CART
+; 16. ADD TO CART
 ; ==========================================
 addCart PROC
     mov ebx, id
@@ -1012,7 +1178,7 @@ addCart ENDP
 
 
 ; ==========================================
-; 15. PAYMENT & RECEIPT MODULE (INTEGRATED)
+; 17. PAYMENT & RECEIPT MODULE (INTEGRATED)
 ; ==========================================
 PaymentReceiptModule PROC
     mov eax, currentTheme
@@ -1145,21 +1311,64 @@ CardNumberLoop:
     mov edx, OFFSET cardNumberMsg
     call WriteString
 
-    mov edx, OFFSET cardNumber
-    mov ecx, SIZEOF cardNumber
-    call ReadString
+    mov esi, OFFSET cardNumber
+    mov ecx, 0
 
-    mov edx, OFFSET cardNumber
-    mov ecx, 16
-    call ValidateDigits
+ReadCardDigit:
+    call ReadChar
 
-    cmp eax, 1
-    je ExpiryInput
+    ; Enter is accepted only after all 16 digits are entered
+    cmp al, 13
+    je CheckCardComplete
 
+    ; Check whether input is a digit
+    cmp al, '0'
+    jb InvalidCardInput
+    cmp al, '9'
+    ja InvalidCardInput
+
+    ; Store the actual digit internally
+    mov BYTE PTR [esi], al
+    inc esi
+    inc ecx
+
+    ; Display * instead of the actual digit
+    mov al, '*'
+    call WriteChar
+
+    ; Read until 16 digits are entered
+    cmp ecx, 16
+    jl ReadCardDigit
+
+WaitForCardEnter:
+    ; Stay on the card-number line until the user manually presses Enter
+    call ReadChar
+    cmp al, 13
+    jne WaitForCardEnter
+
+CheckCardComplete:
+    cmp ecx, 16
+    jne InvalidCardInput
+
+    mov BYTE PTR [esi], 0
+    call Crlf
+    jmp ExpiryInput
+
+InvalidCardInput:
+    call Crlf
     mov eax, currentTheme
     call SetTextColor
     mov edx, OFFSET invalidCardMsg
     call WriteString
+
+    ; Clear card-number buffer
+    mov esi, OFFSET cardNumber
+    mov ecx, 32
+ClearCardBuffer:
+    mov BYTE PTR [esi], 0
+    inc esi
+    loop ClearCardBuffer
+
     jmp CardNumberLoop
 
 ExpiryInput:
@@ -1288,7 +1497,7 @@ PaymentReceiptModule ENDP
 
 
 ; ==========================================
-; 16. PARSE RM STRING TO CENTS
+; 18. PARSE RM STRING TO CENTS
 ; ==========================================
 ParseRMToCents PROC
     mov esi, edx
@@ -1384,7 +1593,7 @@ ParseRMToCents ENDP
 
 
 ; ==========================================
-; 17. VALIDATE DIGITS HELPER
+; 19. VALIDATE DIGITS HELPER
 ; ==========================================
 ValidateDigits PROC
     mov esi, edx
@@ -1419,7 +1628,7 @@ ValidateDigits ENDP
 
 
 ; ==========================================
-; 18. GENERATE & PRINT SALES RECEIPT
+; 20. GENERATE & PRINT SALES RECEIPT
 ; ==========================================
 GenerateReceipt PROC
     mov eax, currentTheme
@@ -1445,7 +1654,7 @@ ReceiptItemLoop:
     call WriteString
 
     push ecx
-    lea edx, (Shoe PTR [esi]).shoeName           ; Resolves dynamic offset at runtime
+    lea edx, (Shoe PTR [esi]).shoeName
     call StrLength             
     mov ecx, 27
     sub ecx, eax
@@ -1541,6 +1750,8 @@ DisplayPaymentAmount:
     mov edx, OFFSET thankYouMsg
     call WriteString
 
+    call RecordTransaction     ; Log transaction into history buffer
+
     mov edx, OFFSET returnMsg
     call WriteString
     call ReadChar
@@ -1549,7 +1760,7 @@ GenerateReceipt ENDP
 
 
 ; ==========================================
-; 19. DISPLAY MONEY IN RM FORMAT (X.XX)
+; 21. DISPLAY MONEY IN RM FORMAT (X.XX)
 ; ==========================================
 DisplayMoney PROC
     mov ebx, CENT
@@ -1571,5 +1782,183 @@ DisplayCents:
     call WriteDec
     ret
 DisplayMoney ENDP
+
+
+; ==========================================
+; 22. RECORD PURCHASE TRANSACTION
+; ==========================================
+RecordTransaction PROC
+    cmp salesCount, MAX_SALES
+    jae RecordFull              ; Ignore if log buffer is maxed out
+
+    ; Calculate memory offset = salesCount * SIZEOF PurchaseRecord
+    mov eax, salesCount
+    mov ebx, TYPE PurchaseRecord
+    mul ebx
+    mov esi, OFFSET salesHistory
+    add esi, eax
+
+    ; Set Transaction ID (1-based index)
+    mov eax, salesCount
+    inc eax
+    mov (PurchaseRecord PTR [esi]).transactionID, eax
+
+    ; Set Grand Total
+    mov eax, grandTotal
+    mov (PurchaseRecord PTR [esi]).totalAmount, eax
+
+    ; Set Payment Type
+    mov eax, paymentMethod
+    mov (PurchaseRecord PTR [esi]).paymentType, eax
+
+    ; Sum total quantity of item pairs
+    mov edi, OFFSET shoeCart
+    mov ecx, LENGTHOF shoeCart
+    mov ebx, 0
+
+CountItemsLoop:
+    mov eax, (Shoe PTR [edi]).shoeQuantity
+    add ebx, eax
+    add edi, TYPE Shoe
+    loop CountItemsLoop
+
+    mov (PurchaseRecord PTR [esi]).itemCount, ebx
+
+    inc salesCount
+
+RecordFull:
+    ret
+RecordTransaction ENDP
+
+
+; ==========================================
+; 23. GENERATE & DISPLAY SALES REPORT
+; ==========================================
+GenerateSalesReport PROC
+    LOCAL totalRev:DWORD, countCash:DWORD, countCard:DWORD, countQR:DWORD
+    
+    mov totalRev, 0
+    mov countCash, 0
+    mov countCard, 0
+    mov countQR, 0
+
+    mov eax, currentTheme
+    call SetTextColor
+    call Clrscr
+
+    mov edx, OFFSET reportTitle
+    call WriteString
+
+    cmp salesCount, 0
+    jne PrintReportData
+
+    mov edx, OFFSET repNoSales
+    call WriteString
+    call Crlf
+    call WaitMsg
+    ret
+
+PrintReportData:
+    mov edx, OFFSET repHeader
+    call WriteString
+
+    mov esi, OFFSET salesHistory
+    mov ecx, salesCount
+
+ReportLoop:
+    ; Print TX ID
+    mov eax, (PurchaseRecord PTR [esi]).transactionID
+    call WriteDec
+    mov al, ' '
+    call WriteChar
+    call WriteChar
+    call WriteChar
+
+    ; Print Item Count
+    mov eax, (PurchaseRecord PTR [esi]).itemCount
+    call WriteDec
+    mov al, ' '
+    call WriteChar
+    call WriteChar
+    call WriteChar
+    call WriteChar
+
+    ; Print Payment Method String & Count Breakdown
+    mov eax, (PurchaseRecord PTR [esi]).paymentType
+    cmp eax, CASH
+    je RepIsCash
+    cmp eax, CARD
+    je RepIsCard
+
+    mov edx, OFFSET qrPaymentMsg
+    call WriteString
+    inc countQR
+    jmp PrintAmount
+
+RepIsCash:
+    mov edx, OFFSET cashMsg
+    call WriteString
+    inc countCash
+    jmp PrintAmount
+
+RepIsCard:
+    mov edx, OFFSET cardMsg
+    call WriteString
+    inc countCard
+
+PrintAmount:
+    mov al, ' '
+    call WriteChar
+    call WriteChar
+    call WriteChar
+    mov al, 'R'
+    call WriteChar
+    mov al, 'M'
+    call WriteChar
+
+    ; Print Amount & Accumulate Revenue
+    mov eax, (PurchaseRecord PTR [esi]).totalAmount
+    add totalRev, eax
+    call DisplayMoney
+    call Crlf
+
+    add esi, TYPE PurchaseRecord
+    dec ecx
+    jnz NEAR PTR ReportLoop
+
+    mov edx, OFFSET separatorMsg
+    call WriteString
+
+    ; Print Totals Summary
+    mov edx, OFFSET repTotalTx
+    call WriteString
+    mov eax, salesCount
+    call WriteDec
+
+    mov edx, OFFSET repTotalRev
+    call WriteString
+    mov eax, totalRev
+    call DisplayMoney
+
+    mov edx, OFFSET repCashCount
+    call WriteString
+    mov eax, countCash
+    call WriteDec
+
+    mov edx, OFFSET repCardCount
+    call WriteString
+    mov eax, countCard
+    call WriteDec
+
+    mov edx, OFFSET repQRCount
+    call WriteString
+    mov eax, countQR
+    call WriteDec
+
+    call Crlf
+    call Crlf
+    call WaitMsg
+    ret
+GenerateSalesReport ENDP
 
 END main
