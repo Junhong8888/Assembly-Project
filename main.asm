@@ -80,18 +80,21 @@ CENT = 100
     mgrMenuTitle BYTE "==============================", 0dh, 0ah
                  BYTE "      MANAGER DASHBOARD        ", 0dh, 0ah
                  BYTE "==============================", 0dh, 0ah, 0
-    mgrMenuOpt   BYTE "1. Register New Staff", 0dh, 0ah
-                 BYTE "2. Register New Member", 0dh, 0ah
-                 BYTE "3. View Sales Report", 0dh, 0ah
-                 BYTE "4. Logout", 0dh, 0ah
-                 BYTE "Select Option (1-4): ", 0
+    mgrMenuOpt   BYTE "1. Add Staff", 0dh, 0ah
+                 BYTE "2. Remove Staff", 0dh, 0ah
+                 BYTE "3. Update Staff", 0dh, 0ah
+                 BYTE "4. View Sales Report", 0dh, 0ah
+                 BYTE "5. Logout", 0dh, 0ah
+                 BYTE "Select Option (1-5): ", 0
 
     staffTitle   BYTE "==============================", 0dh, 0ah
                  BYTE "        STAFF DASHBOARD        ", 0dh, 0ah
                  BYTE "==============================", 0dh, 0ah, 0
-    staffOpt     BYTE "1. Register New Member", 0dh, 0ah
-                 BYTE "2. Logout", 0dh, 0ah
-                 BYTE "Select Option (1-2): ", 0
+    staffOpt     BYTE "1. Add Stock", 0dh, 0ah
+                 BYTE "2. Remove Stock", 0dh, 0ah
+                 BYTE "3. Update Stock", 0dh, 0ah
+                 BYTE "4. Logout", 0dh, 0ah
+                 BYTE "Select Option (1-4): ", 0
     
     msgRegUser   BYTE "Enter New Username: ", 0
     msgRegPass   BYTE "Enter New Password: ", 0
@@ -105,6 +108,17 @@ CENT = 100
     msgSuccReg   BYTE "Registration Successful!", 0dh, 0ah, 0
     msgGuest     BYTE "Welcome Guest. Proceeding to Sales...", 0dh, 0ah, 0
     msgMemSucc   BYTE "Welcome Member. Proceeding to Sales...", 0dh, 0ah, 0
+
+    ; Management prompts & status messages
+    msgPromptShoeID  BYTE "Enter Shoe ID (1-8): ", 0
+    msgPromptAddQty  BYTE "Enter Stock Quantity to Add: ", 0
+    msgPromptRemQty  BYTE "Enter Stock Quantity to Remove: ", 0
+    msgPromptNewQty  BYTE "Enter New Stock Quantity: ", 0
+    msgPromptNewPrice BYTE "Enter New Price (RM): ", 0
+    msgStockUpdated  BYTE "Stock updated successfully!", 0dh, 0ah, 0
+    msgStaffAdded    BYTE "Staff added successfully!", 0dh, 0ah, 0
+    msgStaffRemoved  BYTE "Staff reset/removed successfully!", 0dh, 0ah, 0
+    msgStaffUpdated  BYTE "Staff credentials updated successfully!", 0dh, 0ah, 0
 
     ; ==========================================
     ; User Roles Context Flag
@@ -726,12 +740,14 @@ MgrStart:
 
     mov al, inChoice[0]
     cmp al, '1'
-    je RegStaff
+    je DoAddStaff
     cmp al, '2'
-    je RegMemMgr
+    je DoRemoveStaff
     cmp al, '3'
-    je ShowReport
+    je DoUpdateStaff
     cmp al, '4'
+    je DoSalesReport
+    cmp al, '5'
     je MgrExit
 
 MgrInvalid:
@@ -742,19 +758,19 @@ MgrInvalid:
     call WaitMsg
     jmp MgrStart
 
-RegStaff:
-    mov esi, OFFSET staffUser
-    mov edi, OFFSET staffPass
-    call RegisterAccount
+DoAddStaff:
+    call AddStaff
     jmp MgrStart
 
-RegMemMgr:
-    mov esi, OFFSET memUser
-    mov edi, OFFSET memPass
-    call RegisterAccount
+DoRemoveStaff:
+    call RemoveStaff
     jmp MgrStart
 
-ShowReport:
+DoUpdateStaff:
+    call UpdateStaff
+    jmp MgrStart
+
+DoSalesReport:
     call GenerateSalesReport
     jmp MgrStart
 
@@ -785,8 +801,12 @@ StaffStart:
 
     mov al, inChoice[0]
     cmp al, '1'
-    je RegMemStaff
+    je DoAddStock
     cmp al, '2'
+    je DoRemoveStock
+    cmp al, '3'
+    je DoUpdateStock
+    cmp al, '4'
     je StaffExit
 
 StaffInvalid:
@@ -797,15 +817,179 @@ StaffInvalid:
     call WaitMsg
     jmp StaffStart
 
-RegMemStaff:
-    mov esi, OFFSET memUser
-    mov edi, OFFSET memPass
-    call RegisterAccount
+DoAddStock:
+    call AddStock
     jmp StaffStart
+
+DoRemoveStock:
+    call RemoveStock
+    jmp StaffStart
+
+DoUpdateStock:
+    call UpdateStock
+    jmp StaffStart
+
 
 StaffExit:
     ret
 StaffDashboard ENDP
+
+
+; ==========================================
+; ADMIN SUBROUTINES (STAFF MANAGEMENT)
+; ==========================================
+AddStaff PROC
+    mov esi, OFFSET staffUser
+    mov edi, OFFSET staffPass
+    call RegisterAccount
+    ret
+AddStaff ENDP
+
+RemoveStaff PROC
+    call Clrscr
+    ; Clear existing staff user/pass buffers
+    mov edi, OFFSET staffUser
+    mov ecx, SIZEOF staffUser
+    mov al, 0
+    rep stosb
+
+    mov edi, OFFSET staffPass
+    mov ecx, SIZEOF staffPass
+    mov al, 0
+    rep stosb
+
+    mov edx, OFFSET msgStaffRemoved
+    call WriteString
+    call WaitMsg
+    ret
+RemoveStaff ENDP
+
+UpdateStaff PROC
+    call Clrscr
+    mov esi, OFFSET staffUser
+    mov edi, OFFSET staffPass
+    call RegisterAccount
+    ret
+UpdateStaff ENDP
+
+
+; ==========================================
+; STAFF SUBROUTINES (STOCK MANAGEMENT)
+; ==========================================
+AddStock PROC
+    call Clrscr
+    call displayCatalog
+    mov edx, OFFSET msgPromptShoeID
+    call WriteString
+    call ReadInt
+    cmp eax, 1
+    jl InvalidShoe
+    cmp eax, 8
+    jg InvalidShoe
+
+    dec eax
+    mov ebx, TYPE Shoe
+    mul ebx
+    mov esi, OFFSET shoes
+    add esi, eax
+
+    mov edx, OFFSET msgPromptAddQty
+    call WriteString
+    call ReadInt
+
+    add (Shoe PTR [esi]).shoeQuantity, eax
+    mov edx, OFFSET msgStockUpdated
+    call WriteString
+    call WaitMsg
+    ret
+
+InvalidShoe:
+    mov edx, OFFSET msgErrC
+    call WriteString
+    call WaitMsg
+    ret
+AddStock ENDP
+
+RemoveStock PROC
+    call Clrscr
+    call displayCatalog
+    mov edx, OFFSET msgPromptShoeID
+    call WriteString
+    call ReadInt
+    cmp eax, 1
+    jl InvalidShoeRem
+    cmp eax, 8
+    jg InvalidShoeRem
+
+    dec eax
+    mov ebx, TYPE Shoe
+    mul ebx
+    mov esi, OFFSET shoes
+    add esi, eax
+
+    mov edx, OFFSET msgPromptRemQty
+    call WriteString
+    call ReadInt
+
+    cmp eax, (Shoe PTR [esi]).shoeQuantity
+    ja StockUnderflow
+    sub (Shoe PTR [esi]).shoeQuantity, eax
+    jmp StockRemDone
+
+StockUnderflow:
+    mov (Shoe PTR [esi]).shoeQuantity, 0
+
+StockRemDone:
+    mov edx, OFFSET msgStockUpdated
+    call WriteString
+    call WaitMsg
+    ret
+
+InvalidShoeRem:
+    mov edx, OFFSET msgErrC
+    call WriteString
+    call WaitMsg
+    ret
+RemoveStock ENDP
+
+UpdateStock PROC
+    call Clrscr
+    call displayCatalog
+    mov edx, OFFSET msgPromptShoeID
+    call WriteString
+    call ReadInt
+    cmp eax, 1
+    jl InvalidShoeUpd
+    cmp eax, 8
+    jg InvalidShoeUpd
+
+    dec eax
+    mov ebx, TYPE Shoe
+    mul ebx
+    mov esi, OFFSET shoes
+    add esi, eax
+
+    mov edx, OFFSET msgPromptNewQty
+    call WriteString
+    call ReadInt
+    mov (Shoe PTR [esi]).shoeQuantity, eax
+
+    mov edx, OFFSET msgPromptNewPrice
+    call WriteString
+    call ReadInt
+    mov (Shoe PTR [esi]).shoePrice, eax
+
+    mov edx, OFFSET msgStockUpdated
+    call WriteString
+    call WaitMsg
+    ret
+
+InvalidShoeUpd:
+    mov edx, OFFSET msgErrC
+    call WriteString
+    call WaitMsg
+    ret
+UpdateStock ENDP
 
 
 ; ==========================================
