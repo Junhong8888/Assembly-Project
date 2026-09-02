@@ -16,11 +16,14 @@ PurchaseRecord STRUCT
     itemCount     DWORD ?   ; Total shoe pairs purchased
 PurchaseRecord ENDS
 
-; Payment Method Constants
+; Payment Method & Invoice Constants
 CASH = 1
 CARD = 2
 QR   = 3
 CENT = 100
+MEMBER_RATE = 5
+SST_RATE = 6
+ONE_HUNDRED = 100
 
 .data
     ; ==========================================
@@ -94,7 +97,7 @@ CENT = 100
                  BYTE "2. Remove Stock", 0dh, 0ah
                  BYTE "3. Update Stock", 0dh, 0ah
                  BYTE "4. Logout", 0dh, 0ah
-                 BYTE "Select Option (1-): ", 0
+                 BYTE "Select Option (1-4): ", 0
     
     msgRegUser   BYTE "Enter New Username: ", 0
     msgRegPass   BYTE "Enter New Password: ", 0
@@ -110,15 +113,15 @@ CENT = 100
     msgMemSucc   BYTE "Welcome Member. Proceeding to Sales...", 0dh, 0ah, 0
 
     ; Management prompts & status messages
-    msgPromptShoeID  BYTE "Enter Shoe ID (1-8): ", 0
-    msgPromptAddQty  BYTE "Enter Stock Quantity to Add: ", 0
-    msgPromptRemQty  BYTE "Enter Stock Quantity to Remove: ", 0
-    msgPromptNewQty  BYTE "Enter New Stock Quantity: ", 0
+    msgPromptShoeID   BYTE "Enter Shoe ID (1-8): ", 0
+    msgPromptAddQty   BYTE "Enter Stock Quantity to Add: ", 0
+    msgPromptRemQty   BYTE "Enter Stock Quantity to Remove: ", 0
+    msgPromptNewQty   BYTE "Enter New Stock Quantity: ", 0
     msgPromptNewPrice BYTE "Enter New Price (RM): ", 0
-    msgStockUpdated  BYTE "Stock updated successfully!", 0dh, 0ah, 0
-    msgStaffAdded    BYTE "Staff added successfully!", 0dh, 0ah, 0
-    msgStaffRemoved  BYTE "Staff reset/removed successfully!", 0dh, 0ah, 0
-    msgStaffUpdated  BYTE "Staff credentials updated successfully!", 0dh, 0ah, 0
+    msgStockUpdated   BYTE "Stock updated successfully!", 0dh, 0ah, 0
+    msgStaffAdded     BYTE "Staff added successfully!", 0dh, 0ah, 0
+    msgStaffRemoved   BYTE "Staff reset/removed successfully!", 0dh, 0ah, 0
+    msgStaffUpdated   BYTE "Staff credentials updated successfully!", 0dh, 0ah, 0
 
     ; ==========================================
     ; User Roles Context Flag
@@ -202,12 +205,16 @@ CENT = 100
     quit       BYTE "Continue to add items ? (Y/n) ",0
 
     ; ==========================================
-    ; Integrated Payment & Receipt Data
+    ; Integrated Payment & Invoice Strings
     ; ==========================================
     totalSubtotal  DWORD 0   ; In Cents
     discountAmount DWORD 0   ; In Cents
+    taxableAmount  DWORD 0   ; In Cents
     sstAmount      DWORD 0   ; In Cents
     grandTotal     DWORD 0   ; In Cents
+
+    ringgitAmount  DWORD 0
+    centAmount     DWORD 0
 
     paymentMethod  DWORD ?
     amountPaid     DWORD ?
@@ -290,6 +297,21 @@ CENT = 100
     invalidQRMsg BYTE 13,10
                  BYTE "Invalid input. Please enter Y or N.",13,10,0
 
+    invoiceTitle BYTE 13,10
+                 BYTE "========== INVOICE ==========",13,10,0
+
+    itemLabel     BYTE 13,10,"Item ",0
+    priceLabel    BYTE "   Unit Price: ",0
+    quantityLabel BYTE "   Quantity: ",0
+    subtotalLabel BYTE "   Subtotal: ",0
+    lineLabel     BYTE 13,10,"-----------------------------",13,10,0
+
+    totalLabel    BYTE "Total Subtotal: ",0
+    discountLabel BYTE 13,10,"Discount: ",0
+    taxableLabel  BYTE 13,10,"Taxable Amount: ",0
+    sstLabel      BYTE 13,10,"SST (6%): ",0
+    grandLabel    BYTE 13,10,"GRAND TOTAL: ",0
+
     receiptTitle BYTE 13,10
                  BYTE "========================================================",13,10
                  BYTE "                         MALWH",13,10
@@ -303,16 +325,16 @@ CENT = 100
     separatorMsg  BYTE "--------------------------------------------------------",13,10,0
 
     subtotalMsg BYTE 13,10
-                BYTE "Subtotal:                                      RM",0
+                BYTE "Subtotal:                                      ",0
 
     discountMsg BYTE 13,10
-                BYTE "Member Discount (5%):                          -RM",0
+                BYTE "Member Discount (5%):                          -",0
 
     sstMsg BYTE 13,10
-           BYTE "SST (6%):                                      RM",0
+           BYTE "SST (6%):                                      ",0
 
     grandTotalMsg BYTE 13,10
-                  BYTE "GRAND TOTAL:                                   RM",0
+                  BYTE "GRAND TOTAL:                                   ",0
 
     paymentMethodMsg BYTE 13,10
                      BYTE "Payment Method:                                ",0
@@ -322,10 +344,10 @@ CENT = 100
     qrPaymentMsg BYTE "QR Payment",0
 
     amountPaidMsg BYTE 13,10
-                  BYTE "Amount Paid:                                   RM",0
+                  BYTE "Amount Paid:                                   ",0
 
     changeMsg BYTE 13,10
-              BYTE "Change:                                        RM",0
+              BYTE "Change:                                        ",0
 
     paymentCompleteMsg BYTE 13,10
                        BYTE "Payment Status:                                SUCCESS",13,10,0
@@ -335,7 +357,11 @@ CENT = 100
                 BYTE "             Thank you for shopping with us!",13,10
                 BYTE "            The goods sold are not refundable,",13,10
                 BYTE "               returnable and exchangeable.",13,10
-                BYTE "========================================================",13,10,
+                BYTE "========================================================",13,10,0
+
+    rmText BYTE "RM ",0
+    decimalText BYTE ".",0
+    zeroText BYTE "0",0
 
     returnMsg BYTE 13,10
               BYTE "Press any key to exit to Main Menu...",0
@@ -458,6 +484,7 @@ DoGuestLogin:
     call WaitMsg
     call ClearCart
     call getInput
+    call GenerateInvoice
     call PaymentReceiptModule
     jmp GatewayStart
 
@@ -539,6 +566,7 @@ DoMemLogin:
     call WaitMsg
     call ClearCart
     call getInput
+    call GenerateInvoice
     call PaymentReceiptModule
     jmp LoginStart
 
@@ -829,7 +857,6 @@ DoUpdateStock:
     call UpdateStock
     jmp StaffStart
 
-
 StaffExit:
     ret
 StaffDashboard ENDP
@@ -847,7 +874,6 @@ AddStaff ENDP
 
 RemoveStaff PROC
     call Clrscr
-    ; Clear existing staff user/pass buffers
     mov edi, OFFSET staffUser
     mov ecx, SIZEOF staffUser
     mov al, 0
@@ -1221,47 +1247,6 @@ goodQty:
     call Crlf
 
 .UNTIL (al == 'N' || al == 'n')
-
-    mov eax, currentTheme
-    call SetTextColor
-    call Clrscr
-    mov edx, OFFSET header
-    call WriteString
-
-    mov esi, OFFSET shoeCart
-    mov ecx, LENGTHOF shoeCart
-
-L3:
-    mov eax, (Shoe PTR [esi]).shoeQuantity
-    cmp eax, 0
-    je SkipItem
-
-    mov eax, (Shoe PTR [esi]).shoeID
-    call WriteDec
-    mov al, ' '
-    call WriteChar
-    
-    lea edx, (Shoe PTR [esi]).shoeName   
-    call WriteString
-    call Crlf
-
-    mov edx, OFFSET getShoeQty
-    call WriteString
-    mov eax, (Shoe PTR [esi]).shoeQuantity
-    call WriteDec
-    call Crlf
-
-    mov eax, (Shoe PTR [esi]).shoePrice
-    call WriteDec
-    call Crlf
-    call Crlf
-
-SkipItem:
-    add esi, TYPE Shoe
-    loop L3
-
-    call Crlf
-    call WaitMsg
     ret
 getInput ENDP
 
@@ -1293,13 +1278,13 @@ L1:
     call WriteString
 
     mov dh, bl
-    mov dl, 36
+    mov dl, 39
     call Gotoxy
     mov eax, (Shoe PTR [esi]).shoeQuantity
     call WriteDec
 
     mov dh, bl
-    mov dl, 47
+    mov dl, 50
     call Gotoxy
     mov eax, (Shoe PTR [esi]).shoePrice
     call WriteDec
@@ -1362,9 +1347,9 @@ addCart ENDP
 
 
 ; ==========================================
-; 17. PAYMENT & RECEIPT MODULE (INTEGRATED)
+; 17. GENERATE INVOICE
 ; ==========================================
-PaymentReceiptModule PROC
+GenerateInvoice PROC
     mov eax, currentTheme
     call SetTextColor
     call Clrscr
@@ -1383,33 +1368,166 @@ CalcCartTotal:
     mul ebx
     mov totalSubtotal, eax
 
-    cmp isMemberUser, 1
-    jne NoDiscount
+    call CalculateDiscount
+    call CalculateTaxableAmount
+    call CalculateSST
+    call CalculateGrandTotal
+    call DisplayInvoice
+    ret
+GenerateInvoice ENDP
 
+
+; ==========================================
+; CALCULATE DISCOUNT
+; ==========================================
+CalculateDiscount PROC
+    cmp isMemberUser, 1
+    je MemberDiscount
+
+    mov discountAmount, 0
+    ret
+
+MemberDiscount:
     mov eax, totalSubtotal
-    mov ebx, 5
+    mov ebx, MEMBER_RATE
     mul ebx
-    mov ebx, 100
+    mov ebx, ONE_HUNDRED
+    mov edx, 0
     div ebx
     mov discountAmount, eax
-    jmp CalcSST
+    ret
+CalculateDiscount ENDP
 
-NoDiscount:
-    mov discountAmount, 0
 
-CalcSST:
+; ==========================================
+; CALCULATE TAXABLE AMOUNT
+; ==========================================
+CalculateTaxableAmount PROC
     mov eax, totalSubtotal
     sub eax, discountAmount
-    mov ebx, 6
+    mov taxableAmount, eax
+    ret
+CalculateTaxableAmount ENDP
+
+
+; ==========================================
+; CALCULATE SST
+; ==========================================
+CalculateSST PROC
+    mov eax, taxableAmount
+    mov ebx, SST_RATE
     mul ebx
-    mov ebx, 100
+    mov ebx, ONE_HUNDRED
+    mov edx, 0
     div ebx
     mov sstAmount, eax
+    ret
+CalculateSST ENDP
 
+
+; ==========================================
+; CALCULATE GRAND TOTAL
+; ==========================================
+CalculateGrandTotal PROC
     mov eax, totalSubtotal
     sub eax, discountAmount
     add eax, sstAmount
     mov grandTotal, eax
+    ret
+CalculateGrandTotal ENDP
+
+
+; ==========================================
+; DISPLAY INVOICE
+; ==========================================
+DisplayInvoice PROC
+    mov edx, OFFSET invoiceTitle
+    call WriteString
+
+    mov esi, OFFSET shoeCart
+    mov ecx, LENGTHOF shoeCart
+    mov ebx, 1                  ; Item counter
+
+DisplayInvoiceLoop:
+    push ecx
+    mov eax, (Shoe PTR [esi]).shoeQuantity
+    cmp eax, 0
+    je SkipInvoiceItem
+
+    lea edx, (Shoe PTR [esi]).shoeName
+    call WriteString
+
+    mov edx, OFFSET priceLabel
+    call WriteString
+    
+    ; Unit Price in Cents
+    mov eax, (Shoe PTR [esi]).shoePrice
+    mov ecx, (Shoe PTR [esi]).shoeQuantity
+    mov edx, 0
+    div ecx
+    mov ecx, CENT
+    mul ecx
+    call DisplayMoney
+
+    mov edx, OFFSET quantityLabel
+    call WriteString
+    mov eax, (Shoe PTR [esi]).shoeQuantity
+    call WriteDec
+
+    mov edx, OFFSET subtotalLabel
+    call WriteString
+    mov eax, (Shoe PTR [esi]).shoePrice
+    mov ecx, CENT
+    mul ecx
+    call DisplayMoney
+
+SkipInvoiceItem:
+    inc ebx
+    add esi, TYPE Shoe
+    pop ecx
+    loop DisplayInvoiceLoop
+
+    mov edx, OFFSET lineLabel
+    call WriteString
+
+    mov edx, OFFSET totalLabel
+    call WriteString
+    mov eax, totalSubtotal
+    call DisplayMoney
+
+    mov edx, OFFSET discountLabel
+    call WriteString
+    mov eax, discountAmount
+    call DisplayMoney
+
+    mov edx, OFFSET taxableLabel
+    call WriteString
+    mov eax, taxableAmount
+    call DisplayMoney
+
+    mov edx, OFFSET sstLabel
+    call WriteString
+    mov eax, sstAmount
+    call DisplayMoney
+
+    mov edx, OFFSET grandLabel
+    call WriteString
+    mov eax, grandTotal
+    call DisplayMoney
+    call Crlf
+    call Crlf
+    call WaitMsg
+    ret
+DisplayInvoice ENDP
+
+
+; ==========================================
+; 18. PAYMENT & RECEIPT MODULE
+; ==========================================
+PaymentReceiptModule PROC
+    mov eax, currentTheme
+    call SetTextColor
+    call Clrscr
 
     mov eax, currentTheme
     call SetTextColor
@@ -1501,31 +1619,25 @@ CardNumberLoop:
 ReadCardDigit:
     call ReadChar
 
-    ; Enter is accepted only after all 16 digits are entered
     cmp al, 13
     je CheckCardComplete
 
-    ; Check whether input is a digit
     cmp al, '0'
     jb InvalidCardInput
     cmp al, '9'
     ja InvalidCardInput
 
-    ; Store the actual digit internally
     mov BYTE PTR [esi], al
     inc esi
     inc ecx
 
-    ; Display * instead of the actual digit
     mov al, '*'
     call WriteChar
 
-    ; Read until 16 digits are entered
     cmp ecx, 16
     jl ReadCardDigit
 
 WaitForCardEnter:
-    ; Stay on the card-number line until the user manually presses Enter
     call ReadChar
     cmp al, 13
     jne WaitForCardEnter
@@ -1545,7 +1657,6 @@ InvalidCardInput:
     mov edx, OFFSET invalidCardMsg
     call WriteString
 
-    ; Clear card-number buffer
     mov esi, OFFSET cardNumber
     mov ecx, 32
 ClearCardBuffer:
@@ -1681,7 +1792,7 @@ PaymentReceiptModule ENDP
 
 
 ; ==========================================
-; 18. PARSE RM STRING TO CENTS
+; 19. PARSE RM STRING TO CENTS
 ; ==========================================
 ParseRMToCents PROC
     mov esi, edx
@@ -1777,7 +1888,7 @@ ParseRMToCents ENDP
 
 
 ; ==========================================
-; 19. VALIDATE DIGITS HELPER
+; 20. VALIDATE DIGITS HELPER
 ; ==========================================
 ValidateDigits PROC
     mov esi, edx
@@ -1812,7 +1923,7 @@ ValidateDigits ENDP
 
 
 ; ==========================================
-; 20. GENERATE & PRINT SALES RECEIPT
+; 21. GENERATE & PRINT SALES RECEIPT
 ; ==========================================
 GenerateReceipt PROC
     mov eax, currentTheme
@@ -1935,6 +2046,7 @@ DisplayPaymentAmount:
     call WriteString
 
     call RecordTransaction     ; Log transaction into history buffer
+    call UpdateStockAfterPurchase ;Update stock
 
     mov edx, OFFSET returnMsg
     call WriteString
@@ -1944,58 +2056,61 @@ GenerateReceipt ENDP
 
 
 ; ==========================================
-; 21. DISPLAY MONEY IN RM FORMAT (X.XX)
+; 22. DISPLAY MONEY IN RM FORMAT
 ; ==========================================
 DisplayMoney PROC
-    mov ebx, CENT
+    mov ebx, ONE_HUNDRED
     mov edx, 0
     div ebx
 
-    call WriteDec
-    mov al, '.'
-    call WriteChar
+    mov ringgitAmount, eax
+    mov centAmount, edx
 
-    cmp edx, 10
+    mov edx, OFFSET rmText
+    call WriteString
+
+    mov eax, ringgitAmount
+    call WriteDec
+
+    mov edx, OFFSET decimalText
+    call WriteString
+
+    cmp centAmount, 10
     jae DisplayCents
 
-    mov al, '0'
-    call WriteChar
+    mov edx, OFFSET zeroText
+    call WriteString
 
 DisplayCents:
-    mov eax, edx
+    mov eax, centAmount
     call WriteDec
     ret
 DisplayMoney ENDP
 
 
 ; ==========================================
-; 22. RECORD PURCHASE TRANSACTION
+; 23. RECORD PURCHASE TRANSACTION
 ; ==========================================
 RecordTransaction PROC
     cmp salesCount, MAX_SALES
     jae RecordFull              ; Ignore if log buffer is maxed out
 
-    ; Calculate memory offset = salesCount * SIZEOF PurchaseRecord
     mov eax, salesCount
     mov ebx, TYPE PurchaseRecord
     mul ebx
     mov esi, OFFSET salesHistory
     add esi, eax
 
-    ; Set Transaction ID (1-based index)
     mov eax, salesCount
     inc eax
     mov (PurchaseRecord PTR [esi]).transactionID, eax
 
-    ; Set Grand Total
     mov eax, grandTotal
     mov (PurchaseRecord PTR [esi]).totalAmount, eax
 
-    ; Set Payment Type
     mov eax, paymentMethod
     mov (PurchaseRecord PTR [esi]).paymentType, eax
 
-    ; Sum total quantity of item pairs
     mov edi, OFFSET shoeCart
     mov ecx, LENGTHOF shoeCart
     mov ebx, 0
@@ -2016,7 +2131,7 @@ RecordTransaction ENDP
 
 
 ; ==========================================
-; 23. GENERATE & DISPLAY SALES REPORT
+; 24. GENERATE & DISPLAY SALES REPORT
 ; ==========================================
 GenerateSalesReport PROC
     LOCAL totalRev:DWORD, countCash:DWORD, countCard:DWORD, countQR:DWORD
@@ -2050,7 +2165,6 @@ PrintReportData:
     mov ecx, salesCount
 
 ReportLoop:
-    ; Print TX ID
     mov eax, (PurchaseRecord PTR [esi]).transactionID
     call WriteDec
     mov al, ' '
@@ -2058,7 +2172,6 @@ ReportLoop:
     call WriteChar
     call WriteChar
 
-    ; Print Item Count
     mov eax, (PurchaseRecord PTR [esi]).itemCount
     call WriteDec
     mov al, ' '
@@ -2067,7 +2180,6 @@ ReportLoop:
     call WriteChar
     call WriteChar
 
-    ; Print Payment Method String & Count Breakdown
     mov eax, (PurchaseRecord PTR [esi]).paymentType
     cmp eax, CASH
     je RepIsCash
@@ -2095,12 +2207,7 @@ PrintAmount:
     call WriteChar
     call WriteChar
     call WriteChar
-    mov al, 'R'
-    call WriteChar
-    mov al, 'M'
-    call WriteChar
 
-    ; Print Amount & Accumulate Revenue
     mov eax, (PurchaseRecord PTR [esi]).totalAmount
     add totalRev, eax
     call DisplayMoney
@@ -2113,7 +2220,6 @@ PrintAmount:
     mov edx, OFFSET separatorMsg
     call WriteString
 
-    ; Print Totals Summary
     mov edx, OFFSET repTotalTx
     call WriteString
     mov eax, salesCount
@@ -2144,5 +2250,48 @@ PrintAmount:
     call WaitMsg
     ret
 GenerateSalesReport ENDP
+
+; ==========================================
+; 25. UPDATE INVENTORY AFTER PURCHASE
+; ==========================================
+UpdateStockAfterPurchase PROC
+    mov esi, OFFSET shoeCart
+    mov ecx, LENGTHOF shoeCart
+
+UpdateLoop:
+    push ecx
+    
+    ; Check if cart item has quantity purchased
+    mov eax, (Shoe PTR [esi]).shoeQuantity
+    cmp eax, 0
+    je SkipStockUpdate
+
+    ; Find matching shoe ID in shoes array
+    mov ebx, (Shoe PTR [esi]).shoeID
+    dec ebx                         ; Convert 1-based ID to 0-based index
+    mov eax, TYPE Shoe
+    mul ebx
+    
+    mov edi, OFFSET shoes
+    add edi, eax                    ; EDI points to matching item in 'shoes'
+
+    ; Subtract cart quantity from inventory stock
+    mov eax, (Shoe PTR [esi]).shoeQuantity
+    cmp eax, (Shoe PTR [edi]).shoeQuantity
+    ja InventoryUnderflow           ; Guard against underflow
+
+    sub (Shoe PTR [edi]).shoeQuantity, eax
+    jmp SkipStockUpdate
+
+InventoryUnderflow:
+    mov (Shoe PTR [edi]).shoeQuantity, 0
+
+SkipStockUpdate:
+    add esi, TYPE Shoe
+    pop ecx
+    loop UpdateLoop
+
+    ret
+UpdateStockAfterPurchase ENDP
 
 END main
