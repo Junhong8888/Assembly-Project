@@ -162,6 +162,7 @@ ONE_HUNDRED = 100
                  BYTE "========================================================", 13, 10, 0
     repHeader    BYTE "TX Qty    Payment     Amount     ", 13, 10
                  BYTE "--------------------------------------------------------", 13, 10, 0
+    repTotalPairs BYTE 13,10, "Total Pairs Sold             : ",0
     repNoSales   BYTE "No transaction records found.", 13, 10, 0
     repTotalTx   BYTE 13, 10, "Total Transactions Processed : ", 0
     repTotalRev  BYTE 13, 10, "Total Revenue Collected      : RM", 0
@@ -184,6 +185,7 @@ ONE_HUNDRED = 100
     id    DWORD ?
     qty   DWORD ?
     price DWORD ?
+    limit DWORD ?
 
     shoes Shoe <1, "Nike Air Jordan 1", 200, 175>,
                <2, "Nike Air Jordan 5", 200, 120>,
@@ -203,6 +205,10 @@ ONE_HUNDRED = 100
     getShoeID  BYTE "Enter Shoe ID (1-8): ",0
     getShoeQty BYTE "Enter quantity: ",0
     quit       BYTE "Continue to add items ? (Y/n) ",0
+
+    ;Error Message
+    errID BYTE "The ID you entered is not in the range. Please re-enter",13,10,0
+    errQty BYTE "The quantity you entered is not in the range. Please re-enter",13,10,0
 
     ; ==========================================
     ; Integrated Payment & Invoice Strings
@@ -296,6 +302,8 @@ ONE_HUNDRED = 100
 
     invalidQRMsg BYTE 13,10
                  BYTE "Invalid input. Please enter Y or N.",13,10,0
+
+    invalidExpiryMsg BYTE "Invalid Expiry Date! Format must be MM/YY (Month 01-12, Year 26+).",13,10,0
 
     invoiceTitle BYTE 13,10
                  BYTE "========== INVOICE ==========",13,10,0
@@ -905,29 +913,46 @@ UpdateStaff ENDP
 AddStock PROC
     call Clrscr
     call displayCatalog
+
+PromptAddID:
     mov edx, OFFSET msgPromptShoeID
+    call Crlf
     call WriteString
     call ReadInt
+    
     cmp eax, 1
     jl InvalidShoe
-    cmp eax, 8
+    cmp eax, LENGTHOF shoes
     jg InvalidShoe
 
+    ; Calculate memory offset
     dec eax
     mov ebx, TYPE Shoe
     mul ebx
     mov esi, OFFSET shoes
     add esi, eax
 
+PromptAddQty:
     mov edx, OFFSET msgPromptAddQty
+    call Crlf
     call WriteString
     call ReadInt
 
+    ; Validation Check: Must be > 0
+    cmp eax, 0
+    jle InvalidQtyAdd
+
     add (Shoe PTR [esi]).shoeQuantity, eax
     mov edx, OFFSET msgStockUpdated
+    call Crlf
     call WriteString
     call WaitMsg
     ret
+
+InvalidQtyAdd:
+    mov edx, OFFSET msgErrC        ; Or custom message: "Quantity must be greater than 0!"
+    call WriteString
+    jmp PromptAddQty
 
 InvalidShoe:
     mov edx, OFFSET msgErrC
@@ -936,26 +961,38 @@ InvalidShoe:
     ret
 AddStock ENDP
 
+
 RemoveStock PROC
     call Clrscr
     call displayCatalog
+
+PromptRemID:
     mov edx, OFFSET msgPromptShoeID
+    call Crlf
     call WriteString
     call ReadInt
+
     cmp eax, 1
     jl InvalidShoeRem
-    cmp eax, 8
+    cmp eax, LENGTHOF shoes
     jg InvalidShoeRem
 
+    ; Calculate memory offset
     dec eax
     mov ebx, TYPE Shoe
     mul ebx
     mov esi, OFFSET shoes
     add esi, eax
 
+PromptRemQty:
     mov edx, OFFSET msgPromptRemQty
+    call Crlf
     call WriteString
     call ReadInt
+
+    ; Validation Check: Must be > 0
+    cmp eax, 0
+    jle InvalidQtyRem
 
     cmp eax, (Shoe PTR [esi]).shoeQuantity
     ja StockUnderflow
@@ -967,9 +1004,15 @@ StockUnderflow:
 
 StockRemDone:
     mov edx, OFFSET msgStockUpdated
+    call Crlf
     call WriteString
     call WaitMsg
     ret
+
+InvalidQtyRem:
+    mov edx, OFFSET msgErrC
+    call WriteString
+    jmp PromptRemQty
 
 InvalidShoeRem:
     mov edx, OFFSET msgErrC
@@ -978,37 +1021,68 @@ InvalidShoeRem:
     ret
 RemoveStock ENDP
 
+
 UpdateStock PROC
     call Clrscr
     call displayCatalog
+
+PromptUpdID:
     mov edx, OFFSET msgPromptShoeID
+    call Crlf
     call WriteString
     call ReadInt
+
     cmp eax, 1
     jl InvalidShoeUpd
-    cmp eax, 8
+    cmp eax, LENGTHOF shoes
     jg InvalidShoeUpd
 
+    ; Calculate memory offset
     dec eax
     mov ebx, TYPE Shoe
     mul ebx
     mov esi, OFFSET shoes
     add esi, eax
 
+PromptUpdQty:
     mov edx, OFFSET msgPromptNewQty
+    call Crlf
     call WriteString
     call ReadInt
+
+    ; Validation Check: Must be > 0
+    cmp eax, 0
+    jle InvalidQtyUpd
+
     mov (Shoe PTR [esi]).shoeQuantity, eax
 
+PromptUpdPrice:
     mov edx, OFFSET msgPromptNewPrice
+    call Crlf
     call WriteString
     call ReadInt
+
+    ; Validation Check: Price must also be > 0
+    cmp eax, 0
+    jle InvalidPriceUpd
+
     mov (Shoe PTR [esi]).shoePrice, eax
 
     mov edx, OFFSET msgStockUpdated
+    call Crlf
     call WriteString
     call WaitMsg
     ret
+
+InvalidQtyUpd:
+    mov edx, OFFSET msgErrC
+    call WriteString
+    jmp PromptUpdQty
+
+InvalidPriceUpd:
+    mov edx, OFFSET msgErrC
+    call WriteString
+    jmp PromptUpdPrice
 
 InvalidShoeUpd:
     mov edx, OFFSET msgErrC
@@ -1201,39 +1275,65 @@ getInput PROC
     call Clrscr
     call displayCatalog
 
+; Get shoe ID
 inputID:
-    mov eax, currentTheme
-    call SetTextColor
     mov edx, OFFSET getShoeID
     call Crlf
     call WriteString
     call ReadInt
-    jnc goodInput
+    jno goodInput
     jmp inputID
 
 goodInput:
-    cmp eax, 8
-    jg inputID
+    cmp eax, LENGTHOF shoes
+    jg ErrInput
     cmp eax, 1
-    jl inputID
-    mov id, eax     
+    jl ErrInput
+    jmp ExitInputID
 
+ErrInput:
+    mov edx, OFFSET errID
+    call WriteString
+    jmp inputID
+
+ExitInputID:
+    mov id, eax     ; Save selected shoe ID
+
+    ; --- FETCH ACTUAL STOCK LIMIT FOR SELECTED SHOE ---
+    mov ebx, id
+    dec ebx                         ; Convert 1-based ID to 0-based index
+    mov eax, TYPE Shoe
+    mul ebx
+    mov esi, OFFSET shoes
+    add esi, eax
+    
+    mov eax, (Shoe PTR [esi]).shoeQuantity
+    mov limit, eax                  ; Update limit with selected shoe's stock
+    ; --------------------------------------------------
+
+; Get shoe quantity
 inputQty:
-    mov eax, currentTheme
-    call SetTextColor
     mov edx, OFFSET getShoeQty
     call Crlf
     call WriteString
     call ReadInt
-    jnc goodQty
+    jno goodQty
+    jmp inputQty
+    
+goodQty:
+    cmp eax, limit
+    jg ErrMsg
+    cmp eax, 1
+    jl ErrMsg
+    jmp ExitInputQty
+   
+ErrMsg:
+    mov edx, OFFSET errQty
+    call WriteString
     jmp inputQty
 
-goodQty:
-    cmp eax, 200
-    jg inputQty
-    cmp eax, 1
-    jl inputQty
-    mov qty, eax     
+ExitInputQty:
+    mov qty, eax    ; Save selected quantity
     
     call calcPrice
     call addCart
@@ -1648,7 +1748,7 @@ CheckCardComplete:
 
     mov BYTE PTR [esi], 0
     call Crlf
-    jmp ExpiryInput
+    jmp ExpiryInputLoop         ; <--- Updated target
 
 InvalidCardInput:
     call Crlf
@@ -1666,7 +1766,10 @@ ClearCardBuffer:
 
     jmp CardNumberLoop
 
-ExpiryInput:
+; ==========================================
+; ADDED: EXPIRY DATE VALIDATION LOOP (MM/YY)
+; ==========================================
+ExpiryInputLoop:
     mov eax, currentTheme
     call SetTextColor
     mov edx, OFFSET expiryMsg
@@ -1675,6 +1778,19 @@ ExpiryInput:
     mov edx, OFFSET expiryDate
     mov ecx, SIZEOF expiryDate
     call ReadString
+
+    ; Call helper procedure to validate MM/YY format & values
+    mov edx, OFFSET expiryDate
+    call ValidateExpiryDate
+
+    cmp eax, 1                  ; EAX = 1 means valid expiry
+    je CVVLoop
+
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET invalidExpiryMsg
+    call WriteString
+    jmp ExpiryInputLoop
 
 CVVLoop:
     mov eax, currentTheme
@@ -2156,10 +2272,15 @@ RecordTransaction ENDP
 ; ==========================================
 ; 24. GENERATE & DISPLAY SALES REPORT
 ; ==========================================
+; ==========================================
+; GENERATE SALES REPORT (WITH TOTAL PAIRS)
+; ==========================================
 GenerateSalesReport PROC
-    LOCAL totalRev:DWORD, countCash:DWORD, countCard:DWORD, countQR:DWORD
+    LOCAL totalRev:DWORD, totalPairs:DWORD, countCash:DWORD, countCard:DWORD, countQR:DWORD
     
+    ; 1. Initialize local trackers
     mov totalRev, 0
+    mov totalPairs, 0
     mov countCash, 0
     mov countCard, 0
     mov countQR, 0
@@ -2188,6 +2309,10 @@ PrintReportData:
     mov ecx, salesCount
 
 ReportLoop:
+    ; Protect main loop counter (ECX) from internal function modifications
+    push ecx
+
+    ; --- Column 1: Transaction ID ---
     mov eax, (PurchaseRecord PTR [esi]).transactionID
     call WriteDec
     mov al, ' '
@@ -2195,7 +2320,9 @@ ReportLoop:
     call WriteChar
     call WriteChar
 
+    ; --- Column 2: Item Count (Pairs Sold) ---
     mov eax, (PurchaseRecord PTR [esi]).itemCount
+    add totalPairs, eax             ; Accumulate total pairs sold
     call WriteDec
     mov al, ' '
     call WriteChar
@@ -2203,6 +2330,7 @@ ReportLoop:
     call WriteChar
     call WriteChar
 
+    ; --- Column 3: Payment Type ---
     mov eax, (PurchaseRecord PTR [esi]).paymentType
     cmp eax, CASH
     je RepIsCash
@@ -2231,21 +2359,32 @@ PrintAmount:
     call WriteChar
     call WriteChar
 
+    ; --- Column 4: Total Amount ---
     mov eax, (PurchaseRecord PTR [esi]).totalAmount
-    add totalRev, eax
+    add totalRev, eax               ; Accumulate total revenue
     call DisplayMoney
     call Crlf
 
+    ; Advance record pointer and restore loop counter
     add esi, TYPE PurchaseRecord
-    dec ecx
-    jnz NEAR PTR ReportLoop
+    pop ecx
 
+    dec ecx
+    jnz ReportLoop
+
+    ; --- Summary Output Section ---
     mov edx, OFFSET separatorMsg
     call WriteString
 
     mov edx, OFFSET repTotalTx
     call WriteString
     mov eax, salesCount
+    call WriteDec
+
+    ; Display Total Pairs Sold
+    mov edx, OFFSET repTotalPairs    ; Ensure repTotalPairs is defined in .data
+    call WriteString
+    mov eax, totalPairs
     call WriteDec
 
     mov edx, OFFSET repTotalRev
@@ -2316,5 +2455,87 @@ SkipStockUpdate:
 
     ret
 UpdateStockAfterPurchase ENDP
+
+; ==========================================
+; 26. VALIDATE EXPIRY DATE (MM/YY)
+; ==========================================
+ValidateExpiryDate PROC
+    push esi
+    push ebx
+    mov esi, edx
+
+    ; 1. Check total length (Must be exactly 5 chars: MM/YY)
+    call StrLength
+    cmp eax, 5
+    jne InvalidExpiry
+
+    ; 2. Check '/' separator at index 2
+    mov al, BYTE PTR [esi + 2]
+    cmp al, '/'
+    jne InvalidExpiry
+
+    ; 3. Validate MM digits (indices 0 & 1)
+    mov al, BYTE PTR [esi]
+    cmp al, '0'
+    jb InvalidExpiry
+    cmp al, '9'
+    ja InvalidExpiry
+
+    mov al, BYTE PTR [esi + 1]
+    cmp al, '0'
+    jb InvalidExpiry
+    cmp al, '9'
+    ja InvalidExpiry
+
+    ; Convert MM to integer and check range (01 - 12)
+    mov al, BYTE PTR [esi]
+    sub al, '0'
+    mov bl, 10
+    mul bl
+    mov bl, BYTE PTR [esi + 1]
+    sub bl, '0'
+    add al, bl                     ; AL = Month number
+
+    cmp al, 1
+    jl InvalidExpiry
+    cmp al, 12
+    jg InvalidExpiry
+
+    ; 4. Validate YY digits (indices 3 & 4)
+    mov al, BYTE PTR [esi + 3]
+    cmp al, '0'
+    jb InvalidExpiry
+    cmp al, '9'
+    ja InvalidExpiry
+
+    mov al, BYTE PTR [esi + 4]
+    cmp al, '0'
+    jb InvalidExpiry
+    cmp al, '9'
+    ja InvalidExpiry
+
+    ; Convert YY to integer and check for non-expired year (>= 26)
+    mov al, BYTE PTR [esi + 3]
+    sub al, '0'
+    mov bl, 10
+    mul bl
+    mov bl, BYTE PTR [esi + 4]
+    sub bl, '0'
+    add al, bl                     ; AL = Year number
+
+    cmp al, 26                     ; Threshold year (2026+)
+    jl InvalidExpiry
+
+    mov eax, 1                     ; Valid Expiry
+    pop ebx
+    pop esi
+    ret
+
+InvalidExpiry:
+    mov eax, 0                     ; Invalid Expiry
+    pop ebx
+    pop esi
+    ret
+ValidateExpiryDate ENDP
 
 END main
