@@ -25,11 +25,6 @@ MEMBER_RATE = 5
 SST_RATE = 6
 ONE_HUNDRED = 100
 
-; Shoe size selection constants
-MIN_SHOE_SIZE = 5
-MAX_SHOE_SIZE = 12
-SIZE_COUNT    = 8
-
 .data
     ; ==========================================
     ; ASCII Logo & Themes 
@@ -194,11 +189,6 @@ SIZE_COUNT    = 8
     limit DWORD ?
     shoeSize DWORD ?
 
-    ; Cart quantity by product and shoe size.
-    ; 8 products x 8 sizes (5-12).
-    ; Index = ((shoe ID - 1) * SIZE_COUNT) + (shoe size - MIN_SHOE_SIZE)
-    cartSizeQty DWORD 64 DUP(0)
-
     shoes Shoe <1, "Nike Air Jordan 1", 200, 175>,
                <2, "Nike Air Jordan 5", 200, 120>,
                <3, "Nike Air Jordan 6", 200, 280>,
@@ -214,16 +204,14 @@ SIZE_COUNT    = 8
            
     footer BYTE "=====================================================", 13, 10, 0
 
-    getShoeID   BYTE "Enter Shoe ID (1-8): ",0
-    getShoeSize  BYTE "Enter Shoe Size (5-12): ",0
-    getShoeQty   BYTE "Enter quantity: ",0
-    quit        BYTE "Continue to add items ? (Y/n) ",0
+    getShoeID  BYTE "Enter Shoe ID (1-8): ",0
+    getShoeQty BYTE "Enter quantity: ",0
+    quit       BYTE "Continue to add items ? (Y/n) ",0
 
-    ; Error / size messages
-    errID       BYTE "The ID you entered is not in the range. Please re-enter",13,10,0
-    errSize     BYTE "The shoe size must be between 5 and 12. Please re-enter.",13,10,0
-    errQty      BYTE "The quantity you entered is not in the range. Please re-enter",13,10,0
-    errEmpty    BYTE "Stock is empty or fully added to cart! Please choose another.",13,10,0
+    ;Error Message
+    errID BYTE "The ID you entered is not in the range. Please re-enter",13,10,0
+    errQty BYTE "The quantity you entered is not in the range. Please re-enter",13,10,0
+    errEmpty BYTE "Stock is empty or fully added to cart! Please choose another.",13,10,0
 
     ; ==========================================
     ; Integrated Payment & Invoice Strings
@@ -325,7 +313,6 @@ SIZE_COUNT    = 8
 
     itemLabel     BYTE 13,10,"Item ",0
     priceLabel    BYTE "   Unit Price: ",0
-    sizeLabel      BYTE "   Shoe Size: ",0
     quantityLabel BYTE "   Quantity: ",0
     subtotalLabel BYTE "   Subtotal: ",0
     lineLabel     BYTE 13,10,"-----------------------------",13,10,0
@@ -345,7 +332,7 @@ SIZE_COUNT    = 8
                  BYTE "--------------------------------------------------------",13,10
                  BYTE "--------------------------------------------------------",13,10,0
 
-    productHeader BYTE "Product                Size Qty  Unit Price Total Price",13,10,0
+    productHeader BYTE "Product                Qty  Unit Price Total Price",13,10,0
     separatorMsg  BYTE "--------------------------------------------------------",13,10,0
 
     subtotalMsg BYTE 13,10
@@ -1340,7 +1327,6 @@ StringCopy ENDP
 ; 12. HELPER: CLEAR CART BETWEEN TRANSACTIONS
 ; ==========================================
 ClearCart PROC
-    ; Clear the normal cart totals.
     mov esi, OFFSET shoeCart
     mov ecx, LENGTHOF shoeCart
 ClearLoop:
@@ -1348,14 +1334,6 @@ ClearLoop:
     mov (Shoe PTR [esi]).shoePrice, 0
     add esi, TYPE Shoe
     loop ClearLoop
-
-    ; Clear the per-size cart quantities.
-    mov esi, OFFSET cartSizeQty
-    mov ecx, LENGTHOF cartSizeQty
-ClearSizeCartLoop:
-    mov DWORD PTR [esi], 0
-    add esi, TYPE DWORD
-    loop ClearSizeCartLoop
     ret
 ClearCart ENDP
 
@@ -1393,72 +1371,46 @@ ErrInput:
     jmp inputID
 
 ExitInputID:
-    mov id, eax
+    mov id, eax     ; Save selected shoe ID
 
-    ; -------------------------------------------------
-    ; Check total remaining stock for the selected shoe.
-    ; Size is tracked separately, but the existing product
-    ; stock quantity remains the overall stock limit.
-    ; -------------------------------------------------
+    ; --- FETCH ACTUAL STOCK LIMIT FOR SELECTED SHOE ---
     mov ebx, id
-    dec ebx
+    dec ebx                         ; Convert 1-based ID to 0-based index
     mov eax, TYPE Shoe
     mul ebx
-    mov ebx, eax
-
+    mov ebx, eax                    ; EBX now correctly holds the byte offset
+    
+    ; Get original store stock
     mov esi, OFFSET shoes
     add esi, ebx
     mov eax, (Shoe PTR [esi]).shoeQuantity
-    mov limit, eax
-
-    ; Subtract quantity already in the cart for this product.
+    mov limit, eax                  
+    
+    ; Check cart and deduct previously added quantity
     mov edi, OFFSET shoeCart
     add edi, ebx
     mov eax, (Shoe PTR [edi]).shoeQuantity
-
+    
+    ; Calculate remaining limit
     mov edx, limit
-    sub edx, eax
-    mov limit, edx
+    sub edx, eax                  
+    mov limit, edx                  ; Prevent infinite cart glitch
 
+    ; If the limit is now 0 (or lower), immediately block them!
     mov eax, limit
     cmp eax, 0
-    jg inputSize
-
+    jg inputQty
+    
     mov eax, currentTheme
     call SetTextColor
     mov edx, OFFSET errEmpty
     call Crlf
     call WriteString
     call WaitMsg
-    jmp inputID
+    jmp inputID                    
+    
 
-; -------------------------------------------------
-; Get shoe size
-; -------------------------------------------------
-inputSize:
-    mov edx, OFFSET getShoeSize
-    call Crlf
-    call WriteString
-    call ReadInt
-    jno goodSize
-    jmp inputSize
-
-goodSize:
-    cmp eax, MIN_SHOE_SIZE
-    jl ErrSizeInput
-    cmp eax, MAX_SHOE_SIZE
-    jg ErrSizeInput
-    mov shoeSize, eax
-    jmp inputQty
-
-ErrSizeInput:
-    mov edx, OFFSET errSize
-    call WriteString
-    jmp inputSize
-
-; -------------------------------------------------
 ; Get shoe quantity
-; -------------------------------------------------
 inputQty:
     mov edx, OFFSET getShoeQty
     call Crlf
@@ -1466,7 +1418,7 @@ inputQty:
     call ReadInt
     jno goodQty
     jmp inputQty
-
+    
 goodQty:
     mov edx, limit
     cmp eax, edx
@@ -1474,15 +1426,15 @@ goodQty:
     cmp eax, 1
     jl ErrMsg
     jmp ExitInputQty
-
+   
 ErrMsg:
     mov edx, OFFSET errQty
     call WriteString
     jmp inputQty
 
 ExitInputQty:
-    mov qty, eax
-
+    mov qty, eax    ; Save selected quantity
+    
     call calcPrice
     call addCart
 
@@ -1616,44 +1568,20 @@ calcPrice ENDP
 ; 16. ADD TO CART
 ; ==========================================
 addCart PROC
-    ; -----------------------------------------------
-    ; Update the existing product-level cart totals.
-    ; -----------------------------------------------
     mov ebx, id
-    dec ebx
+    dec ebx                     
     mov eax, TYPE Shoe
-    mul ebx
+    mul ebx                      
     mov ebx, eax
 
     mov esi, OFFSET shoeCart
-    add esi, ebx
+    add esi, ebx                
 
     mov eax, price
     add (Shoe PTR [esi]).shoePrice, eax
 
     mov eax, qty
     add (Shoe PTR [esi]).shoeQuantity, eax
-
-    ; -----------------------------------------------
-    ; Update the selected product + selected size.
-    ; Index = ((id - 1) * SIZE_COUNT)
-    ;         + (shoeSize - MIN_SHOE_SIZE)
-    ; Each entry is a DWORD.
-    ; -----------------------------------------------
-    mov eax, id
-    dec eax
-    imul eax, SIZE_COUNT
-
-    mov ebx, shoeSize
-    sub ebx, MIN_SHOE_SIZE
-    add eax, ebx
-
-    shl eax, 2
-    mov esi, OFFSET cartSizeQty
-    add esi, eax
-
-    mov eax, qty
-    add DWORD PTR [esi], eax
     ret
 addCart ENDP
 
@@ -1758,97 +1686,46 @@ DisplayInvoice PROC
 
     mov esi, OFFSET shoeCart
     mov ecx, LENGTHOF shoeCart
+    mov ebx, 1                  ; Item counter
 
-DisplayInvoiceProductLoop:
+DisplayInvoiceLoop:
     push ecx
-
-    ; Check if overall quantity for product is 0
     mov eax, (Shoe PTR [esi]).shoeQuantity
     cmp eax, 0
-    je SkipInvoiceProduct
+    je SkipInvoiceItem
 
-    ; Calculate pointer to cartSizeQty entry for this shoe ID
-    mov eax, (Shoe PTR [esi]).shoeID
-    dec eax
-    imul eax, SIZE_COUNT
-    shl eax, 2
-    mov edi, OFFSET cartSizeQty
-    add edi, eax
-
-    push esi                        ; Preserve shoeCart pointer
-    mov ecx, SIZE_COUNT
-    mov ebx, MIN_SHOE_SIZE          ; Track current size (5 to 12)
-
-DisplayInvoiceSizeLoop:
-    push ecx                        ; Preserve size loop counter
-    
-    mov eax, DWORD PTR [edi]
-    cmp eax, 0
-    je SkipInvoiceSize
-
-    ; Print Shoe Name
     lea edx, (Shoe PTR [esi]).shoeName
     call WriteString
 
-    ; Print Unit Price
     mov edx, OFFSET priceLabel
     call WriteString
     
-    ; Compute Unit Price = (shoePrice / shoeQuantity)
+    ; Unit Price in Cents
     mov eax, (Shoe PTR [esi]).shoePrice
     mov ecx, (Shoe PTR [esi]).shoeQuantity
     mov edx, 0
-    div ecx                         ; EAX = Unit Price
-    
-    push ebx                        ; 1. Push EBX (Size)
-    push eax                        ; 2. Push EAX (Unit Price)
-    
+    div ecx
     mov ecx, CENT
     mul ecx
     call DisplayMoney
 
-    ; Print Shoe Size
-    mov edx, OFFSET sizeLabel
-    call WriteString
-    
-    ; Access pushed EBX on stack without messing up stack order
-    mov eax, [esp + 4]              ; Peek EBX (Size) from stack
-    call WriteDec
-
-    ; Print Size Quantity
     mov edx, OFFSET quantityLabel
     call WriteString
-    mov eax, DWORD PTR [edi]
+    mov eax, (Shoe PTR [esi]).shoeQuantity
     call WriteDec
 
-    ; Print Line Subtotal
     mov edx, OFFSET subtotalLabel
     call WriteString
-    
-    pop eax                         ; 1. Pop EAX (Unit Price)
-    pop ebx                         ; 2. Pop EBX (Size restored cleanly)
-    
-    mov ecx, DWORD PTR [edi]        ; Quantity purchased for THIS size
-    mul ecx                         ; Unit Price * Quantity
+    mov eax, (Shoe PTR [esi]).shoePrice
     mov ecx, CENT
     mul ecx
     call DisplayMoney
     call Crlf
-
-SkipInvoiceSize:
-    add edi, TYPE DWORD
+SkipInvoiceItem:
     inc ebx
-    pop ecx
-    dec ecx                         ; Decrement inner loop counter
-    jnz DisplayInvoiceSizeLoop      ; Fixes "jump destination too far" (uses 32-bit jump)
-
-    pop esi                         ; Restore shoeCart pointer
-
-SkipInvoiceProduct:
     add esi, TYPE Shoe
     pop ecx
-    dec ecx
-    jnz DisplayInvoiceProductLoop
+    loop DisplayInvoiceLoop
 
     mov edx, OFFSET lineLabel
     call WriteString
@@ -2287,7 +2164,8 @@ GenerateReceipt PROC
 
     mov edx, OFFSET receiptTitle
     call WriteString
-
+    
+    ; Header: Product (25) | Qty (5) | Unit Price (12) | Total Price
     mov edx, OFFSET productHeader
     call WriteString
     mov edx, OFFSET separatorMsg
@@ -2296,111 +2174,66 @@ GenerateReceipt PROC
     mov esi, OFFSET shoeCart
     mov ecx, LENGTHOF shoeCart
 
-ReceiptProductLoop:
-    push ecx
-
+ReceiptItemLoop:
     mov eax, (Shoe PTR [esi]).shoeQuantity
     cmp eax, 0
-    je SkipReceiptProduct
+    je SkipReceiptItem
 
-    mov eax, (Shoe PTR [esi]).shoeID
-    dec eax
-    imul eax, SIZE_COUNT
-    shl eax, 2
-    mov edi, OFFSET cartSizeQty
-    add edi, eax
+    ; Preserve loop counter across printing operations
+    push ecx
 
-    push esi                        ; Preserve shoeCart pointer
-    mov ecx, SIZE_COUNT
-    mov ebx, MIN_SHOE_SIZE
-
-ReceiptSizeLoop:
-    push ecx                        ; Preserve size loop counter
-
-    mov eax, DWORD PTR [edi]
-    cmp eax, 0
-    je SkipReceiptSize
-
-; 1. Display Shoe Name
+    ; 1. Display Shoe Name
     lea edx, (Shoe PTR [esi]).shoeName
     call WriteString
 
-    ; 2. Pad Shoe Name Column to align with "Size" header (35 chars target)
+    ; 2. Pad Shoe Name Column (25 chars)
     lea edx, (Shoe PTR [esi]).shoeName
-    call StrLength
+    call StrLength             
     mov ecx, 25
     sub ecx, eax
 PadNameLoop:
-    cmp ecx, 0
-    jle EndPad
     mov al, ' '
     call WriteChar
     loop PadNameLoop
 
-EndPad:
-    ; 3. Display Size (2 columns width)
-    push ebx                        ; Preserve size counter EBX
-    mov eax, ebx
-    cmp eax, 10
-    jae PrintTwoDigitSize
-    mov al, ' '                     ; Alignment space for single-digit sizes (5-9)
-    call WriteChar
-
-PrintTwoDigitSize:
-    mov eax, ebx
+    ; 3. Display Quantity & Pad Column (5 chars)
+    mov eax, (Shoe PTR [esi]).shoeQuantity
     call WriteDec
-    mov al, ' '                     ; Spacing after Size
+    
+    mov al, ' '
     call WriteChar
     call WriteChar
 
-    ; 4. Display Quantity
-    mov eax, DWORD PTR [edi]
-    call WriteDec
-    mov al, ' '                     ; Spacing after Qty
-    call WriteChar
-    call WriteChar
-    call WriteChar
-
-    ; 5. Calculate and Display Unit Price
+    ; 4. Calculate & Display Unit Price (Line Total / Quantity)
     mov eax, (Shoe PTR [esi]).shoePrice
     mov ecx, (Shoe PTR [esi]).shoeQuantity
     mov edx, 0
-    div ecx
+    div ecx                     ; EAX = Unit Price in RM
+
     mov ecx, CENT
-    mul ecx
-    
-    push eax                        ; Store unit price on stack for total calculation
+    mul ecx                     ; EAX = Unit Price in Cents
     call DisplayMoney
 
-    mov al, ' '                     ; Spacing after Unit Price
+    ; 5. Pad Unit Price Column
+    mov al, ' '
     call WriteChar
     call WriteChar
 
-    ; 6. Calculate and Display Line Total Price
-    pop eax                         ; Restore unit price
-    mov ecx, DWORD PTR [edi]        ; Multiply by quantity for this specific size
-    mul ecx
+    ; 6. Calculate & Display Line Total Price
+    mov eax, (Shoe PTR [esi]).shoePrice
+    mov ecx, CENT
+    mul ecx                     ; EAX = Line Total in Cents
     call DisplayMoney
-
-    pop ebx                         ; Restore correct size counter into EBX
     call Crlf
 
-SkipReceiptSize:
-    add edi, TYPE DWORD
-    inc ebx
+    ; Restore main loop counter
     pop ecx
-    dec ecx                         ; Decrement size loop counter
-    jnz ReceiptSizeLoop             ; Uses 32-bit relative jump (fixes "destination too far")
 
-    pop esi                         ; Restore shoeCart pointer
-
-SkipReceiptProduct:
+SkipReceiptItem:
     add esi, TYPE Shoe
-    pop ecx
-    dec ecx
-    jnz ReceiptProductLoop
+    loop ReceiptItemLoop
 
-    ; --- Summary & Payment Section ---
+    ; --- Summary Section ---
     mov edx, OFFSET separatorMsg
     call WriteString
 
@@ -2428,6 +2261,7 @@ SkipReceiptProduct:
     mov edx, OFFSET separatorMsg
     call WriteString
 
+    ; --- Payment Details ---
     mov edx, OFFSET paymentMethodMsg
     call WriteString
 
@@ -2465,8 +2299,9 @@ DisplayPaymentAmount:
     mov edx, OFFSET thankYouMsg
     call WriteString
 
-    call RecordTransaction
-    call UpdateStockAfterPurchase
+    ; --- Post-Processing Calls ---
+    call RecordTransaction           ; Log transaction into history buffer
+    call UpdateStockAfterPurchase    ; Update inventory stock in shoes array
 
     mov edx, OFFSET returnMsg
     call WriteString
