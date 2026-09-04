@@ -96,8 +96,9 @@ ONE_HUNDRED = 100
     staffOpt     BYTE "1. Add Stock", 0dh, 0ah
                  BYTE "2. Remove Stock", 0dh, 0ah
                  BYTE "3. Update Stock", 0dh, 0ah
-                 BYTE "4. Logout", 0dh, 0ah
-                 BYTE "Select Option (1-4): ", 0
+                 BYTE "4. View Current Stock", 0dh, 0ah
+                 BYTE "5. Logout", 0dh, 0ah
+                 BYTE "Select Option (1-5): ", 0
     
     msgRegUser   BYTE "Enter New Username: ", 0
     msgRegPass   BYTE "Enter New Password: ", 0
@@ -209,6 +210,7 @@ ONE_HUNDRED = 100
     ;Error Message
     errID BYTE "The ID you entered is not in the range. Please re-enter",13,10,0
     errQty BYTE "The quantity you entered is not in the range. Please re-enter",13,10,0
+    errEmpty BYTE "Stock is empty or fully added to cart! Please choose another.",13,10,0
 
     ; ==========================================
     ; Integrated Payment & Invoice Strings
@@ -843,6 +845,8 @@ StaffStart:
     cmp al, '3'
     je DoUpdateStock
     cmp al, '4'
+    je DoViewStock
+    cmp al, '5'
     je StaffExit
 
 StaffInvalid:
@@ -863,6 +867,10 @@ DoRemoveStock:
 
 DoUpdateStock:
     call UpdateStock
+    jmp StaffStart
+
+DoViewStock:
+    call ViewStock
     jmp StaffStart
 
 StaffExit:
@@ -1091,6 +1099,17 @@ InvalidShoeUpd:
     ret
 UpdateStock ENDP
 
+ViewStock PROC
+    call Clrscr
+    call displayCatalog
+    call Crlf
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET returnMsg
+    call WriteString
+    call ReadChar
+    ret
+ViewStock ENDP
 
 ; ==========================================
 ; 8. ACCOUNT REGISTRATION PROCEDURE
@@ -1304,11 +1323,36 @@ ExitInputID:
     dec ebx                         ; Convert 1-based ID to 0-based index
     mov eax, TYPE Shoe
     mul ebx
-    mov esi, OFFSET shoes
-    add esi, eax
+    mov ebx, eax                    ; EBX now correctly holds the byte offset
     
+    ; Get original store stock
+    mov esi, OFFSET shoes
+    add esi, ebx
     mov eax, (Shoe PTR [esi]).shoeQuantity
-    mov limit, eax                  ; Update limit with selected shoe's stock
+    mov limit, eax                  
+    
+    ; Check cart and deduct previously added quantity
+    mov edi, OFFSET shoeCart
+    add edi, ebx
+    mov eax, (Shoe PTR [edi]).shoeQuantity
+    
+    ; Calculate remaining limit
+    mov edx, limit
+    sub edx, eax                  
+    mov limit, edx                  ; Prevent infinite cart glitch
+
+    ; If the limit is now 0 (or lower), immediately block them!
+    mov eax, limit
+    cmp eax, 0
+    jg inputQty
+    
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET errEmpty
+    call Crlf
+    call WriteString
+    call WaitMsg
+    jmp inputID                     ; Force them to pick a different shoe
     ; --------------------------------------------------
 
 ; Get shoe quantity
@@ -1321,7 +1365,8 @@ inputQty:
     jmp inputQty
     
 goodQty:
-    cmp eax, limit
+    mov edx, limit
+    cmp eax, edx
     jg ErrMsg
     cmp eax, 1
     jl ErrMsg
@@ -1365,6 +1410,10 @@ displayCatalog PROC
     mov bl, 3                    
 
 L1:
+    ; Reset default color at start of each line
+    mov eax, currentTheme
+    call SetTextColor
+
     mov dh, bl                   
     mov dl, 0
     call Gotoxy
@@ -1377,11 +1426,46 @@ L1:
     lea edx, (Shoe PTR [esi]).shoeName   
     call WriteString
 
+    ; --- QUANTITY COLOR LOGIC START ---
     mov dh, bl
     mov dl, 39
     call Gotoxy
+
+    mov eax, (Shoe PTR [esi]).shoeQuantity
+
+    cmp eax, 200
+    jge SetGreenQty
+    cmp eax, 20
+    jl SetRedQty
+
+    ; Default theme color for quantity between 20 and 199
+    mov eax, currentTheme
+    call SetTextColor
+    jmp PrintQty
+
+SetGreenQty:
+    ; Mask background color from currentTheme and apply green text
+    mov eax, currentTheme
+    and eax, 0F0h               ; Preserve background color bits
+    or  eax, green              ; Set foreground to green
+    call SetTextColor
+    jmp PrintQty
+
+SetRedQty:
+    ; Mask background color from currentTheme and apply red text
+    mov eax, currentTheme
+    and eax, 0F0h               ; Preserve background color bits
+    or  eax, lightRed           ; Set foreground to red (or red)
+    call SetTextColor
+
+PrintQty:
     mov eax, (Shoe PTR [esi]).shoeQuantity
     call WriteDec
+
+    ; Reset back to user's selected theme color for remaining output
+    mov eax, currentTheme
+    call SetTextColor
+    ; --- QUANTITY COLOR LOGIC END ---
 
     mov dh, bl
     mov dl, 50
@@ -1391,7 +1475,9 @@ L1:
 
     inc bl                        
     add esi, TYPE Shoe
-    loop L1
+
+    dec ecx                     
+    jnz L1                      
 
     mov dh, bl
     mov dl, 0
@@ -1400,7 +1486,6 @@ L1:
     call WriteString
     ret 
 displayCatalog ENDP
-
 
 ; ==========================================
 ; 15. CALCULATE PRICE
