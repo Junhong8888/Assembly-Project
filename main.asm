@@ -187,6 +187,7 @@ ONE_HUNDRED = 100
     qty   DWORD ?
     price DWORD ?
     limit DWORD ?
+    shoeSize DWORD ?
 
     shoes Shoe <1, "Nike Air Jordan 1", 200, 175>,
                <2, "Nike Air Jordan 5", 200, 120>,
@@ -586,7 +587,7 @@ LoginPortal ENDP
 
 
 ; ==========================================
-; 4. REGISTER PORTAL MENU (PUBLIC ACCESSIBLE)
+; 4. REGISTER PORTAL MENU 
 ; ==========================================
 RegisterPortal PROC
 RegStart:
@@ -1165,9 +1166,12 @@ PromptRegPass:
     call SetTextColor
     mov edx, OFFSET msgRegPass
     call WriteString
+    
+    ; --- MASKED INPUT IMPLEMENTATION ---
     mov edx, pTargetPass
     mov ecx, 30
-    call ReadString
+    call ReadPassword           ; Replaces ReadString to echo '*'
+    ; ----------------------------------
     
     mov esi, pTargetPass
     cmp byte ptr [esi], 0
@@ -1190,6 +1194,57 @@ RegDone:
     ret
 RegisterAccount ENDP
 
+; =========================================================
+; ReadPassword PROC
+; Input:  EDX = offset of buffer
+;         ECX = max buffer length (including null terminator)
+; Output: Password stored in buffer, null-terminated
+; =========================================================
+ReadPassword PROC
+    pushad
+    mov edi, edx                ; EDI points to destination buffer
+    mov ebx, 0                  ; EBX = current character count
+    dec ecx                     ; Reserve space for null terminator
+
+ReadLoop:
+    call ReadChar               ; Read key without auto-echo (AL = ASCII)
+
+    cmp al, 13                  ; Check for ENTER key (ASCII 13)
+    je ReadDone
+
+    cmp al, 8                   ; Check for BACKSPACE key (ASCII 8)
+    je HandleBackspace
+
+    cmp ebx, ecx                ; Check if buffer limit reached
+    jge ReadLoop
+
+    ; Valid character: store and print '*'
+    mov [edi + ebx], al
+    inc ebx
+    mov al, '*'
+    call WriteChar
+    jmp ReadLoop
+
+HandleBackspace:
+    cmp ebx, 0                  ; Nothing to delete if buffer is empty
+    jle ReadLoop
+
+    dec ebx
+    ; Move cursor back, write space to erase '*', move cursor back again
+    mov al, 8
+    call WriteChar
+    mov al, ' '
+    call WriteChar
+    mov al, 8
+    call WriteChar
+    jmp ReadLoop
+
+ReadDone:
+    mov byte ptr [edi + ebx], 0 ; Append null terminator
+    call Crlf
+    popad
+    ret
+ReadPassword ENDP
 
 ; ==========================================
 ; 9. HELPER: CHECK DUPLICATE USERNAME
@@ -1352,8 +1407,8 @@ ExitInputID:
     call Crlf
     call WriteString
     call WaitMsg
-    jmp inputID                     ; Force them to pick a different shoe
-    ; --------------------------------------------------
+    jmp inputID                    
+    
 
 ; Get shoe quantity
 inputQty:
@@ -1798,52 +1853,28 @@ CardNumberLoop:
     mov edx, OFFSET cardNumberMsg
     call WriteString
 
-    mov esi, OFFSET cardNumber
-    mov ecx, 0
+    ; Read 16-digit card number normally (visible input)
+    mov edx, OFFSET cardNumber
+    mov ecx, SIZEOF cardNumber
+    call ReadString
 
-ReadCardDigit:
-    call ReadChar
+    ; Validate that the buffer contains exactly 16 numeric digits
+    mov edx, OFFSET cardNumber
+    mov ecx, 16
+    call ValidateDigits
 
-    cmp al, 13
-    je CheckCardComplete
-
-    cmp al, '0'
-    jb InvalidCardInput
-    cmp al, '9'
-    ja InvalidCardInput
-
-    mov BYTE PTR [esi], al
-    inc esi
-    inc ecx
-
-    mov al, '*'
-    call WriteChar
-
-    cmp ecx, 16
-    jl ReadCardDigit
-
-WaitForCardEnter:
-    call ReadChar
-    cmp al, 13
-    jne WaitForCardEnter
-
-CheckCardComplete:
-    cmp ecx, 16
-    jne InvalidCardInput
-
-    mov BYTE PTR [esi], 0
-    call Crlf
-    jmp ExpiryInputLoop         ; <--- Updated target
+    cmp eax, 1
+    je ExpiryInputLoop
 
 InvalidCardInput:
-    call Crlf
     mov eax, currentTheme
     call SetTextColor
     mov edx, OFFSET invalidCardMsg
     call WriteString
 
+    ; Clear the buffer on invalid input
     mov esi, OFFSET cardNumber
-    mov ecx, 32
+    mov ecx, SIZEOF cardNumber
 ClearCardBuffer:
     mov BYTE PTR [esi], 0
     inc esi
