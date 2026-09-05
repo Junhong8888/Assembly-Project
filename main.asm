@@ -1,22 +1,8 @@
 INCLUDE Irvine32.inc
 
-; Shoe data type definition
-Shoe STRUCT
-    shoeID       DWORD ?
-    shoeName     BYTE 30 DUP(?)
-    shoeQuantity DWORD ?
-    shoePrice    DWORD ?
-Shoe ENDS
-
-; Purchase Record data type definition
-PurchaseRecord STRUCT
-    transactionID DWORD ?
-    totalAmount   DWORD ?   ; In Cents
-    paymentType   DWORD ?   ; 1=Cash, 2=Card, 3=QR
-    itemCount     DWORD ?   ; Total shoe pairs purchased
-PurchaseRecord ENDS
-
-; Payment Method & Invoice Constants
+; ==========================================
+; CONSTANTS
+; ==========================================
 CASH = 1
 CARD = 2
 QR   = 3
@@ -24,11 +10,42 @@ CENT = 100
 MEMBER_RATE = 5
 SST_RATE = 6
 ONE_HUNDRED = 100
+MAX_STAFF = 10
+MAX_SALES = 50
 
-; Shoe size selection constants
-MIN_SHOE_SIZE = 5
-MAX_SHOE_SIZE = 12
-SIZE_COUNT    = 8
+MIN_SIZE = 40
+MAX_SIZE = 45
+NUM_SIZES = 6   ; Sizes 40, 41, 42, 43, 44, 45
+NUM_SHOES = 8   ; Dynamic catalog boundary
+
+; ==========================================
+; ENTERPRISE DATA STRUCTURES
+; ==========================================
+Shoe STRUCT
+    shoeID       DWORD ?
+    shoeName     BYTE 32 DUP(?)     ; Padded to 32 for strict memory alignment
+    shoePrice    DWORD ?
+    ; Size Quantities Array (Offsets: 40->0, 41->4, 42->8, 43->12, 44->16, 45->20)
+    qty40        DWORD ?
+    qty41        DWORD ?
+    qty42        DWORD ?
+    qty43        DWORD ?
+    qty44        DWORD ?
+    qty45        DWORD ?
+Shoe ENDS
+
+PurchaseRecord STRUCT
+    transactionID DWORD ?
+    totalAmount   DWORD ?   ; In Cents
+    paymentType   DWORD ?   ; 1=Cash, 2=Card, 3=QR
+    itemCount     DWORD ?   ; Total shoe pairs purchased
+PurchaseRecord ENDS
+
+Staff STRUCT
+    staffUsername BYTE 30 DUP(?)
+    staffPassword BYTE 30 DUP(?)
+    staffActive   DWORD ?   ; 1 = slot in use, 0 = empty
+Staff ENDS
 
 .data
     ; ==========================================
@@ -50,7 +67,7 @@ SIZE_COUNT    = 8
                  BYTE "2. Dark Theme",13,10
                  BYTE "Enter your choice (1-2): ",0
                  
-    currentTheme DWORD ?    ; Stores active foreground + background attribute
+    currentTheme DWORD ?
 
     ; ==========================================
     ; UI Strings & Menus
@@ -66,7 +83,7 @@ SIZE_COUNT    = 8
                  BYTE "Select Option (1-4): ", 0
 
     loginTitle   BYTE "==========================================", 0dh, 0ah
-                 BYTE "              LOGIN PORTAL                ", 0dh, 0ah
+                 BYTE "             LOGIN PORTAL                 ", 0dh, 0ah
                  BYTE "==========================================", 0dh, 0ah, 0
 
     loginOpt     BYTE "1. Manager Login", 0dh, 0ah
@@ -92,8 +109,9 @@ SIZE_COUNT    = 8
                  BYTE "2. Remove Staff", 0dh, 0ah
                  BYTE "3. Update Staff", 0dh, 0ah
                  BYTE "4. View Sales Report", 0dh, 0ah
-                 BYTE "5. Logout", 0dh, 0ah
-                 BYTE "Select Option (1-5): ", 0
+                 BYTE "5. View Staff List", 0dh, 0ah
+                 BYTE "6. Logout", 0dh, 0ah
+                 BYTE "Select Option (1-6): ", 0
 
     staffTitle   BYTE "==============================", 0dh, 0ah
                  BYTE "        STAFF DASHBOARD        ", 0dh, 0ah
@@ -104,69 +122,109 @@ SIZE_COUNT    = 8
                  BYTE "4. View Current Stock", 0dh, 0ah
                  BYTE "5. Logout", 0dh, 0ah
                  BYTE "Select Option (1-5): ", 0
-    
-    msgRegUser   BYTE "Enter New Username: ", 0
-    msgRegPass   BYTE "Enter New Password: ", 0
-    msgUser      BYTE "Enter Username: ", 0
-    msgPass      BYTE "Enter Password: ", 0
-    
-    msgErrC      BYTE "Error: Invalid choice. Try again.", 0dh, 0ah, 0
-    msgErrL      BYTE "Error: Access Denied! Invalid credentials.", 0dh, 0ah, 0
-    msgErrEmpty  BYTE "Error: Input cannot be empty! Try again.", 0dh, 0ah, 0
-    msgErrDup    BYTE "Error: Username already exists! Try another.", 0dh, 0ah, 0
-    msgSuccReg   BYTE "Registration Successful!", 0dh, 0ah, 0
-    msgGuest     BYTE "Welcome Guest. Proceeding to Sales...", 0dh, 0ah, 0
-    msgMemSucc   BYTE "Welcome Member. Proceeding to Sales...", 0dh, 0ah, 0
 
     ; Management prompts & status messages
-    msgPromptShoeID   BYTE "Enter Shoe ID (1-8): ", 0
+    msgPromptShoeID   BYTE "Enter Shoe ID (1-", 0
+    msgPromptShoeID2  BYTE "): ", 0
+    msgPromptSize     BYTE "Enter Shoe Size (40-45): ", 0
     msgPromptAddQty   BYTE "Enter Stock Quantity to Add: ", 0
     msgPromptRemQty   BYTE "Enter Stock Quantity to Remove: ", 0
     msgPromptNewQty   BYTE "Enter New Stock Quantity: ", 0
     msgPromptNewPrice BYTE "Enter New Price (RM): ", 0
+    
     msgStockUpdated   BYTE "Stock updated successfully!", 0dh, 0ah, 0
     msgStaffAdded     BYTE "Staff added successfully!", 0dh, 0ah, 0
-    msgStaffRemoved   BYTE "Staff reset/removed successfully!", 0dh, 0ah, 0
+    msgStaffRemoved   BYTE "Staff removed successfully!", 0dh, 0ah, 0
     msgStaffUpdated   BYTE "Staff credentials updated successfully!", 0dh, 0ah, 0
+    msgGuest          BYTE "Welcome Guest. Proceeding to Sales...", 0dh, 0ah, 0
+    msgMemSucc        BYTE "Welcome Member. Proceeding to Sales...", 0dh, 0ah, 0
 
-    ; ==========================================
-    ; User Roles Context Flag
-    ; ==========================================
+    ; General Validations
+    msgRegUser        BYTE "Enter New Username: ", 0
+    msgRegPass        BYTE "Enter New Password: ", 0
+    msgUser           BYTE "Enter Username: ", 0
+    msgPass           BYTE "Enter Password: ", 0
+    msgErrC           BYTE "Error: Invalid choice. Try again.", 0dh, 0ah, 0
+    msgErrL           BYTE "Error: Access Denied! Invalid credentials.", 0dh, 0ah, 0
+    msgErrEmpty       BYTE "Error: Input cannot be empty! Try again.", 0dh, 0ah, 0
+    msgErrDup         BYTE "Error: Username already exists! Try another.", 0dh, 0ah, 0
+    msgSuccReg        BYTE "Registration Successful!", 0dh, 0ah, 0
+
+    msgEnterStaffUserRem BYTE "Enter staff username to remove: ", 0
+    msgEnterStaffUserUpd BYTE "Enter staff username to update: ", 0
+    msgStaffNotFound     BYTE "Error: Staff username not found!", 0dh, 0ah, 0
+    msgNoStaffReg        BYTE "Error: No staff account is currently registered!", 0dh, 0ah, 0
+
+    errStockID1  BYTE "Invalid Shoe ID! Please enter a number between 1 and ",0
+    errStockID2  BYTE ".",13,10,0
+    errSize      BYTE "Invalid Size! Please enter a value between 40 and 45.",13,10,0
+    errStockQty  BYTE "Invalid quantity! Please enter a positive whole number.",13,10,0
+    errQty       BYTE "The quantity you entered is not in the range. Please re-enter",13,10,0
+    errRemoveQty BYTE "Cannot remove more than the current stock quantity!",13,10,0
+    errEmpty     BYTE "Stock is empty or fully added to cart! Please choose another.",13,10,0
+
+    ; View staff list strings
+    staffListTitle   BYTE "========================================",13,10
+                     BYTE "            REGISTERED STAFF LIST         ",13,10
+                     BYTE "========================================",13,10,0
+    staffListHeader  BYTE "No.   Username                       Password",13,10,0
+    staffListEmpty   BYTE "No staff accounts registered.",13,10,0
+    msgStaffListFull BYTE "Error: Staff list is full! Cannot add more staff.",13,10,0
+
+    ; Current order (cart) display strings
+    cartTitle    BYTE 13,10,"---------------- YOUR CURRENT ORDER ----------------",13,10,0
+    cartEmptyMsg BYTE "  (No items added yet)",13,10,0
+    cartFooter   BYTE "------------------------------------------------------",13,10,0
+
+    idSeparator BYTE ". ", 0        
+    currentID   DWORD ?
+
+    ; Edit cart strings
+    msgEditCartPrompt BYTE 13,10,"Enter Item ID in your cart to edit/remove (0 = Back): ",0
+    msgEditSizePrompt BYTE "Enter Size to edit (40-45): ",0
+    msgEditSubMenu    BYTE 13,10,"1. Update Quantity",13,10
+                      BYTE "2. Remove Item",13,10
+                      BYTE "3. Back",13,10
+                      BYTE "Select option (1-3): ",0
+    msgItemNotInCart  BYTE 13,10,"This specific item/size is not currently in your cart.",13,10,0
+    msgItemRemoved    BYTE 13,10,"Item removed from cart.",13,10,0
+    msgCartUpdated    BYTE 13,10,"Cart quantity updated.",13,10,0
+    msgInvalidEntry   BYTE 13,10,"Invalid input! Numbers only, please try again.",13,10,0
+
+    ; Switch method prompt
+    msgSwitchMethod BYTE 13,10,"Insufficient funds.",13,10
+                    BYTE "Type T to try a different amount, or C to change payment method: ",0
+
+    ; Context Flag
     isMemberUser DWORD 0    ; 1 = Member, 0 = Non-Member/Guest/Staff
 
-    ; ==========================================
     ; Database (RAM-based Credentials)
-    ; ==========================================
     mgrUser      BYTE "manager", 23 DUP(0) 
     mgrPass      BYTE "123", 27 DUP(0)     
 
-    staffUser    BYTE "staff", 25 DUP(0) 
-    staffPass    BYTE "123", 27 DUP(0)
-    
+    staffList    Staff MAX_STAFF DUP(<>)
+    staffCount   DWORD 0
+
+    defaultStaffUser BYTE "staff",0
+    defaultStaffPass BYTE "123",0
+
     memUser      BYTE "member", 24 DUP(0) 
     memPass      BYTE "123", 27 DUP(0)
 
-    ; ==========================================
-    ; Variables & Buffers
-    ; ==========================================
     inChoice     BYTE 10 DUP(0)  
     inUser       BYTE 30 DUP(0)
     inPass       BYTE 30 DUP(0)
 
-    ; ==========================================
-    ; Purchase History Storage
-    ; ==========================================
-    MAX_SALES    = 50
-    salesHistory PurchaseRecord MAX_SALES DUP(<0,0,0,0>)
-    salesCount   DWORD 0
+    ; Purchase History (Circular Ring Buffer)
+    salesHistory         PurchaseRecord MAX_SALES DUP(<>)
+    salesCount           DWORD 0  ; Index pointer for array (0-49)
+    lifetimeTransactions DWORD 0  ; Infinite counter
 
-    ; ==========================================
     ; Report Interface Strings
-    ; ==========================================
     reportTitle  BYTE "========================================================", 13, 10
-                 BYTE "              ADMIN DASHBOARD - SALES REPORT            ", 13, 10
+                 BYTE "               ADMIN DASHBOARD - SALES REPORT             ", 13, 10
                  BYTE "========================================================", 13, 10, 0
-    repHeader    BYTE "TX Qty    Payment     Amount     ", 13, 10
+    repHeader    BYTE "TX ID     Pairs     Payment      Amount     ", 13, 10
                  BYTE "--------------------------------------------------------", 13, 10, 0
     repTotalPairs BYTE 13,10, "Total Pairs Sold             : ",0
     repNoSales   BYTE "No transaction records found.", 13, 10, 0
@@ -177,62 +235,53 @@ SIZE_COUNT    = 8
     repQRCount   BYTE 13, 10, "QR Code Transactions         : ", 0
     
     ; ==========================================
-    ; Product and Catalog Module
+    ; CATALOG & SIZE MODULE
     ; ==========================================
-    shoeCart Shoe <1, "Nike Air Jordan 1", 0, 0>,
-               <2, "Nike Air Jordan 5", 0, 0>,
-               <3, "Nike Air Jordan 6", 0, 0>,
-               <4, "Adizero EVO SL", 0, 0>,
-               <5, "Racer TR23", 0, 0>,
-               <6, "Harden Volume 9", 0, 0>,
-               <7, "SOFTRIDE Carson Fresh", 0, 0>,
-               <8, "Deviate NITRO 3", 0, 0>
+    ; Initialize empty cart (Prices Pre-Loaded)
+    shoeCart Shoe <1, "Nike Air Jordan 1", 175, 0,0,0,0,0,0>
+             Shoe <2, "Nike Air Jordan 5", 120, 0,0,0,0,0,0>
+             Shoe <3, "Nike Air Jordan 6", 280, 0,0,0,0,0,0>
+             Shoe <4, "Adizero EVO SL", 330, 0,0,0,0,0,0>
+             Shoe <5, "Racer TR23", 230, 0,0,0,0,0,0>
+             Shoe <6, "Harden Volume 9", 450, 0,0,0,0,0,0>
+             Shoe <7, "SOFTRIDE Carson Fresh", 245, 0,0,0,0,0,0>
+             Shoe <8, "Deviate NITRO 3", 300, 0,0,0,0,0,0>
 
-    id    DWORD ?
-    qty   DWORD ?
-    price DWORD ?
-    limit DWORD ?
-    shoeSize DWORD ?
+    ; Initialize Master Store Stock (All set to 30 pairs per size)
+    shoes Shoe <1, "Nike Air Jordan 1", 175, 30,30,30,30,30,30>
+          Shoe <2, "Nike Air Jordan 5", 120, 30,30,30,30,30,30>
+          Shoe <3, "Nike Air Jordan 6", 280, 30,30,30,30,30,30>
+          Shoe <4, "Adizero EVO SL", 330, 30,30,30,30,30,30>
+          Shoe <5, "Racer TR23", 230, 30,30,30,30,30,30>
+          Shoe <6, "Harden Volume 9", 450, 30,30,30,30,30,30>
+          Shoe <7, "SOFTRIDE Carson Fresh", 245, 30,30,30,30,30,30>
+          Shoe <8, "Deviate NITRO 3", 300, 30,30,30,30,30,30>
 
-    ; Cart quantity by product and shoe size.
-    ; 8 products x 8 sizes (5-12).
-    ; Index = ((shoe ID - 1) * SIZE_COUNT) + (shoe size - MIN_SHOE_SIZE)
-    cartSizeQty DWORD 64 DUP(0)
+    id           DWORD ?
+    selectedSize DWORD ?
+    qty          DWORD ?
+    limit        DWORD ?
+    printCol     BYTE  ?
 
-    shoes Shoe <1, "Nike Air Jordan 1", 200, 175>,
-               <2, "Nike Air Jordan 5", 200, 120>,
-               <3, "Nike Air Jordan 6", 200, 280>,
-               <4, "Adizero EVO SL", 200, 330>,
-               <5, "Racer TR23", 200, 230>,
-               <6, "Harden Volume 9", 200, 450>,
-               <7, "SOFTRIDE Carson Fresh", 200, 245>,
-               <8, "Deviate NITRO 3", 200, 300>
+    header BYTE "===============================================================================", 13, 10
+           BYTE "ID  Shoe Name                      Price   | 40  41  42  43  44  45 | Total", 13, 10
+           BYTE "===============================================================================", 13, 10, 0
+    footer BYTE "===============================================================================", 13, 10, 0
 
-    header BYTE "=====================================================", 13, 10
-           BYTE "ID   Shoe Name                       Quantity   Price", 13, 10
-           BYTE "=====================================================", 13, 10, 0
-           
-    footer BYTE "=====================================================", 13, 10, 0
+    getShoeID1 BYTE "Enter Shoe ID (1-",0
+    getShoeID2 BYTE "), or ",0
+    getShoeID3 BYTE " to Edit Cart: ",0
+    getShoeQty BYTE "Enter quantity: ",0
+    quit       BYTE "Continue to add items ? (Y/n) ",0
+    szText1    BYTE " (Sz ",0
+    szText2    BYTE ")",0
 
-    getShoeID   BYTE "Enter Shoe ID (1-8): ",0
-    getShoeSize  BYTE "Enter Shoe Size (5-12): ",0
-    getShoeQty   BYTE "Enter quantity: ",0
-    quit        BYTE "Continue to add items ? (Y/n) ",0
-
-    ; Error / size messages
-    errID       BYTE "The ID you entered is not in the range. Please re-enter",13,10,0
-    errSize     BYTE "The shoe size must be between 5 and 12. Please re-enter.",13,10,0
-    errQty      BYTE "The quantity you entered is not in the range. Please re-enter",13,10,0
-    errEmpty    BYTE "Stock is empty or fully added to cart! Please choose another.",13,10,0
-
-    ; ==========================================
-    ; Integrated Payment & Invoice Strings
-    ; ==========================================
-    totalSubtotal  DWORD 0   ; In Cents
-    discountAmount DWORD 0   ; In Cents
-    taxableAmount  DWORD 0   ; In Cents
-    sstAmount      DWORD 0   ; In Cents
-    grandTotal     DWORD 0   ; In Cents
+    ; Payment Strings
+    totalSubtotal  DWORD 0   
+    discountAmount DWORD 0   
+    taxableAmount  DWORD 0   
+    sstAmount      DWORD 0   
+    grandTotal     DWORD 0   
 
     ringgitAmount  DWORD 0
     centAmount     DWORD 0
@@ -263,7 +312,7 @@ SIZE_COUNT    = 8
                    BYTE "Invalid payment method. Please select 1, 2 or 3.",13,10,0
 
     cashPrompt BYTE 13,10
-               BYTE "Enter amount paid (RM): ",0
+               BYTE "Enter amount paid (RM), or 0 to change payment method: ",0
 
     insufficientMsg BYTE 13,10
                     BYTE "Insufficient payment. Please enter again.",13,10,0
@@ -275,7 +324,7 @@ SIZE_COUNT    = 8
                    BYTE "Cash payment successful!",13,10,0
 
     cardNumberMsg BYTE 13,10
-                  BYTE "Enter Card Number (16 digits): ",0
+                  BYTE "Enter Card Number (16 digits, or press Enter to change payment method): ",0
 
     expiryMsg BYTE "Enter Expiry Date (MM/YY): ",0
     cvvMsg    BYTE "Enter CVV (3 digits): ",0
@@ -323,9 +372,6 @@ SIZE_COUNT    = 8
     invoiceTitle BYTE 13,10
                  BYTE "========== INVOICE ==========",13,10,0
 
-    itemLabel     BYTE 13,10,"Item ",0
-    priceLabel    BYTE "   Unit Price: ",0
-    sizeLabel      BYTE "   Shoe Size: ",0
     quantityLabel BYTE "   Quantity: ",0
     subtotalLabel BYTE "   Subtotal: ",0
     lineLabel     BYTE 13,10,"-----------------------------",13,10,0
@@ -336,52 +382,54 @@ SIZE_COUNT    = 8
     sstLabel      BYTE 13,10,"SST (6%): ",0
     grandLabel    BYTE 13,10,"GRAND TOTAL: ",0
 
-    receiptTitle BYTE 13,10
-                 BYTE "========================================================",13,10
-                 BYTE "                         MALWH",13,10
-                 BYTE "                 25, Jalan Bukit Bintang",13,10
-                 BYTE "                    55100 Kuala Lumpur",13,10
-                 BYTE "                    Tel: 03-2187 6543",13,10
-                 BYTE "--------------------------------------------------------",13,10
-                 BYTE "--------------------------------------------------------",13,10,0
+    msgConfirmOrder BYTE 13,10
+                    BYTE "Confirm this order and proceed to payment? (Y/N): ",0
+    msgModifyOrder  BYTE 13,10
+                    BYTE "Returning to the order screen so you can modify your cart...",13,10,0
+    invalidConfirmMsg BYTE 13,10
+                       BYTE "Invalid input. Please enter Y or N.",13,10,0
 
-    productHeader BYTE "Product                Size Qty  Unit Price Total Price",13,10,0
-    separatorMsg  BYTE "--------------------------------------------------------",13,10,0
+    receiptTitle BYTE 13,10
+                 BYTE "==========================================================================",13,10
+                 BYTE "                                 MALWH",13,10
+                 BYTE "                          25, Jalan Bukit Bintang",13,10
+                 BYTE "                             55100 Kuala Lumpur",13,10
+                 BYTE "                             Tel: 03-2187 6543",13,10
+                 BYTE "--------------------------------------------------------------------------",13,10
+                 BYTE "--------------------------------------------------------------------------",13,10,0
+
+    productHeader BYTE "Product                                Qty     Unit Price     Total Price",13,10,0
+    separatorMsg  BYTE "--------------------------------------------------------------------------",13,10,0
 
     subtotalMsg BYTE 13,10
-                BYTE "Subtotal:                                      ",0
-
+                BYTE "Subtotal:                                                         ",0
     discountMsg BYTE 13,10
-                BYTE "Member Discount (5%):                         -",0
-
+                BYTE "Member Discount (5%):                                            -",0
     sstMsg BYTE 13,10
-           BYTE "SST (6%):                                      ",0
-
+           BYTE "SST (6%):                                                         ",0
     grandTotalMsg BYTE 13,10
-                  BYTE "GRAND TOTAL:                                   ",0
+                  BYTE "GRAND TOTAL:                                                      ",0
 
     paymentMethodMsg BYTE 13,10
-                     BYTE "Payment Method:                                ",0
+                     BYTE "Payment Method:                                                   ",0
 
     cashMsg      BYTE "Cash",0
     cardMsg      BYTE "Card",0
     qrPaymentMsg BYTE "QR Payment",0
 
     amountPaidMsg BYTE 13,10
-                  BYTE "Amount Paid:                                   ",0
-
+                  BYTE "Amount Paid:                                                      ",0
     changeMsg BYTE 13,10
-              BYTE "Change:                                        ",0
-
+              BYTE "Change:                                                           ",0
     paymentCompleteMsg BYTE 13,10
-                       BYTE "Payment Status:                                SUCCESS",13,10,0
+                       BYTE "Payment Status:                                                   SUCCESS",13,10,0
 
     thankYouMsg BYTE 13,10
-                BYTE "--------------------------------------------------------",13,10
-                BYTE "             Thank you for shopping with us!",13,10
-                BYTE "            The goods sold are not refundable,",13,10
-                BYTE "               returnable and exchangeable.",13,10
-                BYTE "========================================================",13,10,0
+                BYTE "--------------------------------------------------------------------------",13,10
+                BYTE "                      Thank you for shopping with us!",13,10
+                BYTE "                     The goods sold are not refundable,",13,10
+                BYTE "                        returnable and exchangeable.",13,10
+                BYTE "==========================================================================",13,10,0
 
     rmText BYTE "RM ",0
     decimalText BYTE ".",0
@@ -391,19 +439,36 @@ SIZE_COUNT    = 8
               BYTE "Press any key to exit to Main Menu...",0
 
 .code
-
 ; ==========================================
 ; MAIN ENTRY POINT
 ; ==========================================
 main PROC
+    call InitDefaultAccounts
     call SelectTheme
     call MainGateway
     exit
 main ENDP
 
+; ==========================================
+; BOOTSTRAP ACCOUNT
+; ==========================================
+InitDefaultAccounts PROC
+    mov ebx, OFFSET staffList
+    mov esi, OFFSET defaultStaffUser
+    lea edi, (Staff PTR [ebx]).staffUsername
+    call StringCopy
+
+    mov esi, OFFSET defaultStaffPass
+    lea edi, (Staff PTR [ebx]).staffPassword
+    call StringCopy
+
+    mov (Staff PTR [ebx]).staffActive, 1
+    mov staffCount, 1
+    ret
+InitDefaultAccounts ENDP
 
 ; ==========================================
-; 1. THEME SELECTION PROCEDURE
+; THEME SELECTION
 ; ==========================================
 SelectTheme PROC
 ThemeStart:
@@ -447,9 +512,8 @@ SetDark:
     ret
 SelectTheme ENDP
 
-
 ; ==========================================
-; 2. MAIN LOGIN / REGISTER GATEWAY
+; GATEWAYS & MENUS
 ; ==========================================
 MainGateway PROC
 GatewayStart:
@@ -507,8 +571,14 @@ DoGuestLogin:
     call Crlf
     call WaitMsg
     call ClearCart
+
+GuestOrderLoop:
     call getInput
     call GenerateInvoice
+    call ConfirmOrder
+    cmp eax, 1
+    jne GuestOrderLoop
+
     call PaymentReceiptModule
     jmp GatewayStart
 
@@ -516,10 +586,6 @@ ExitGateway:
     ret
 MainGateway ENDP
 
-
-; ==========================================
-; 3. LOGIN PORTAL MENU
-; ==========================================
 LoginPortal PROC
 LoginStart:
     mov eax, currentTheme
@@ -567,9 +633,7 @@ DoMgrLogin:
 
 DoStaffLogin:
     mov isMemberUser, 0
-    mov esi, OFFSET staffUser
-    mov edi, OFFSET staffPass
-    call PerformLogin
+    call PerformStaffLogin
     cmp eax, 1
     jne LoginStart
     call StaffDashboard
@@ -589,8 +653,14 @@ DoMemLogin:
     call Crlf
     call WaitMsg
     call ClearCart
+
+MemberOrderLoop:
     call getInput
     call GenerateInvoice
+    call ConfirmOrder
+    cmp eax, 1
+    jne MemberOrderLoop
+
     call PaymentReceiptModule
     jmp LoginStart
 
@@ -598,10 +668,6 @@ ExitLoginPortal:
     ret
 LoginPortal ENDP
 
-
-; ==========================================
-; 4. REGISTER PORTAL MENU 
-; ==========================================
 RegisterPortal PROC
 RegStart:
     mov eax, currentTheme
@@ -644,9 +710,7 @@ RegAdminPublic:
     jmp RegStart
 
 RegStaffPublic:
-    mov esi, OFFSET staffUser
-    mov edi, OFFSET staffPass
-    call RegisterAccount
+    call RegisterStaffAccount
     jmp RegStart
 
 RegMemberPublic:
@@ -659,9 +723,8 @@ ExitRegPortal:
     ret
 RegisterPortal ENDP
 
-
 ; ==========================================
-; 5. UNIFIED LOGIN PROCEDURE
+; LOGIN LOGIC
 ; ==========================================
 PerformLogin PROC
     LOCAL pUser:DWORD, pPass:DWORD
@@ -670,12 +733,10 @@ PerformLogin PROC
 
     mov edi, OFFSET inUser
     mov ecx, SIZEOF inUser
-    mov al, 0
-    rep stosb
+    call SecureZeroMemory
     mov edi, OFFSET inPass
     mov ecx, SIZEOF inPass
-    mov al, 0
-    rep stosb
+    call SecureZeroMemory
 
 PromptUser:
     mov eax, currentTheme
@@ -693,6 +754,7 @@ PromptUser:
     mov edx, OFFSET msgErrEmpty
     call WriteString
     call WaitMsg
+    call Crlf                   
     jmp PromptUser
 
 PromptPass:
@@ -701,16 +763,23 @@ PromptPass:
     mov edx, OFFSET msgPass
     call WriteString
     mov edi, OFFSET inPass
+    mov ecx, 0  ; Counter for password length
 
 PassLoop:
     call ReadChar
-    cmp al, 0Dh                 ; Enter key
+    cmp al, 0Dh                 
     je PassDone
-    cmp al, 08h                 ; Backspace
+    cmp al, 08h                 
     je PassLoop
+
+    ; Buffer overflow protection check
+    cmp ecx, 29
+    jae PassLoop
+
     mov [edi], al
     inc edi
-    mov al, '*'                 ; Mask password
+    inc ecx
+    mov al, '*'                 
     call WriteChar
     jmp PassLoop
 
@@ -725,6 +794,7 @@ PassDone:
     mov edx, OFFSET msgErrEmpty
     call WriteString
     call WaitMsg
+    call Crlf                   
     jmp PromptPass
 
 CompareUser:
@@ -732,8 +802,8 @@ CompareUser:
     mov edi, pUser          
 CompareUserLoop:
     mov al, [esi]
-    mov bl, [edi]
-    cmp al, bl
+    mov dl, [edi]               
+    cmp al, dl
     jne LoginFailed
     cmp al, 0
     je ComparePass
@@ -746,8 +816,8 @@ ComparePass:
     mov edi, pPass          
 ComparePassLoop:
     mov al, [esi]
-    mov bl, [edi]
-    cmp al, bl
+    mov dl, [edi]               
+    cmp al, dl
     jne LoginFailed
     cmp al, 0
     je LoginSuccess
@@ -756,22 +826,148 @@ ComparePassLoop:
     jmp ComparePassLoop
 
 LoginSuccess:
+    mov edi, OFFSET inPass
+    mov ecx, SIZEOF inPass
+    call SecureZeroMemory
     mov eax, 1
     ret
 
 LoginFailed:
+    mov edi, OFFSET inPass
+    mov ecx, SIZEOF inPass
+    call SecureZeroMemory
+
     mov eax, currentTheme
     call SetTextColor
     mov edx, OFFSET msgErrL
     call WriteString
     call WaitMsg
+    call Crlf                   
     mov eax, 0
     ret
 PerformLogin ENDP
 
+PerformStaffLogin PROC
+    mov edi, OFFSET inUser
+    mov ecx, SIZEOF inUser
+    call SecureZeroMemory
+    mov edi, OFFSET inPass
+    mov ecx, SIZEOF inPass
+    call SecureZeroMemory
+
+StaffPromptUser:
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgUser
+    call WriteString
+    mov edx, OFFSET inUser
+    mov ecx, SIZEOF inUser
+    call ReadString
+    cmp inUser[0], 0
+    jne StaffPromptPass
+
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgErrEmpty
+    call WriteString
+    call WaitMsg
+    call Crlf                   
+    jmp StaffPromptUser
+
+StaffPromptPass:
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgPass
+    call WriteString
+    mov edi, OFFSET inPass
+    mov ecx, 0  ; Counter for password length
+
+StaffPassLoop:
+    call ReadChar
+    cmp al, 0Dh
+    je StaffPassDone
+    cmp al, 08h
+    je StaffPassLoop
+
+    ; Buffer overflow protection check
+    cmp ecx, 29
+    jae StaffPassLoop
+
+    mov [edi], al
+    inc edi
+    inc ecx
+    mov al, '*'
+    call WriteChar
+    jmp StaffPassLoop
+
+StaffPassDone:
+    mov byte ptr [edi], 0
+    call Crlf
+    cmp inPass[0], 0
+    jne StaffCheckList
+
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgErrEmpty
+    call WriteString
+    call WaitMsg
+    call Crlf                   
+    jmp StaffPromptPass
+
+StaffCheckList:
+    mov ebx, OFFSET staffList
+    mov ecx, MAX_STAFF
+
+StaffLoginScan:
+    push ecx
+    cmp (Staff PTR [ebx]).staffActive, 0
+    je StaffScanNext
+
+    mov esi, OFFSET inUser
+    lea edi, (Staff PTR [ebx]).staffUsername
+    call StringCompare
+    cmp eax, 1
+    jne StaffScanNext
+
+    mov esi, OFFSET inPass
+    lea edi, (Staff PTR [ebx]).staffPassword
+    call StringCompare
+    cmp eax, 1
+    je StaffLoginSuccessPop
+
+StaffScanNext:
+    add ebx, TYPE Staff
+    pop ecx
+    dec ecx
+    jz StaffLoginFail
+    jmp StaffLoginScan
+
+StaffLoginFail:
+    mov edi, OFFSET inPass
+    mov ecx, SIZEOF inPass
+    call SecureZeroMemory
+
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgErrL
+    call WriteString
+    call WaitMsg
+    call Crlf                   
+    mov eax, 0
+    ret
+
+StaffLoginSuccessPop:
+    pop ecx
+    mov edi, OFFSET inPass
+    mov ecx, SIZEOF inPass
+    call SecureZeroMemory
+    mov eax, 1
+    ret
+PerformStaffLogin ENDP
+
 
 ; ==========================================
-; 6. MANAGER DASHBOARD PROCEDURE
+; DASHBOARDS
 ; ==========================================
 ManagerDashboard PROC
 MgrStart:
@@ -800,7 +996,10 @@ MgrStart:
     cmp al, '4'
     je DoSalesReport
     cmp al, '5'
+    je DoViewStaffList
+    cmp al, '6'
     je MgrExit
+    jmp MgrInvalid
 
 MgrInvalid:
     mov eax, currentTheme
@@ -813,27 +1012,25 @@ MgrInvalid:
 DoAddStaff:
     call AddStaff
     jmp MgrStart
-
 DoRemoveStaff:
     call RemoveStaff
     jmp MgrStart
-
 DoUpdateStaff:
     call UpdateStaff
     jmp MgrStart
-
 DoSalesReport:
     call GenerateSalesReport
     jmp MgrStart
-
+DoViewStaffList:
+    call Clrscr
+    call ShowStaffTable
+    call Crlf
+    call WaitMsg
+    jmp MgrStart
 MgrExit:
     ret
 ManagerDashboard ENDP
 
-
-; ==========================================
-; 7. STAFF DASHBOARD PROCEDURE
-; ==========================================
 StaffDashboard PROC
 StaffStart:
     mov eax, currentTheme
@@ -874,256 +1071,400 @@ StaffInvalid:
 DoAddStock:
     call AddStock
     jmp StaffStart
-
 DoRemoveStock:
     call RemoveStock
     jmp StaffStart
-
 DoUpdateStock:
     call UpdateStock
     jmp StaffStart
-
 DoViewStock:
     call ViewStock
     jmp StaffStart
-
 StaffExit:
     ret
 StaffDashboard ENDP
 
 
 ; ==========================================
-; ADMIN SUBROUTINES (STAFF MANAGEMENT)
+; STAFF MANAGEMENT LOGIC
 ; ==========================================
 AddStaff PROC
-    mov esi, OFFSET staffUser
-    mov edi, OFFSET staffPass
-    call RegisterAccount
+    call RegisterStaffAccount
     ret
 AddStaff ENDP
 
-RemoveStaff PROC
+RegisterStaffAccount PROC
+    cmp staffCount, MAX_STAFF
+    jl StaffSlotAvailable
+
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgStaffListFull
+    call WriteString
+    call WaitMsg
+    ret
+
+StaffSlotAvailable:
+PromptStaffRegUser:
+    mov eax, currentTheme
+    call SetTextColor
     call Clrscr
-    mov edi, OFFSET staffUser
-    mov ecx, SIZEOF staffUser
-    mov al, 0
-    rep stosb
 
-    mov edi, OFFSET staffPass
-    mov ecx, SIZEOF staffPass
-    mov al, 0
-    rep stosb
+    mov edi, OFFSET inUser
+    mov ecx, SIZEOF inUser
+    call SecureZeroMemory
 
+    mov edx, OFFSET msgRegUser
+    call WriteString
+    mov edx, OFFSET inUser
+    mov ecx, SIZEOF inUser
+    call ReadString
+    cmp inUser[0], 0
+    jne StaffDupCheck
+
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgErrEmpty
+    call WriteString
+    call WaitMsg
+    jmp PromptStaffRegUser
+
+StaffDupCheck:
+    call CheckDuplicateUser
+    cmp eax, 1
+    je PromptStaffRegUser
+
+PromptStaffRegPass:
+    mov edi, OFFSET inPass
+    mov ecx, SIZEOF inPass
+    call SecureZeroMemory
+
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgRegPass
+    call WriteString
+    mov edx, OFFSET inPass
+    mov ecx, SIZEOF inPass
+    call ReadString
+
+    cmp inPass[0], 0
+    jne StaffRegSave
+
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgErrEmpty
+    call WriteString
+    call WaitMsg
+    call Crlf                   
+    jmp PromptStaffRegPass
+
+StaffRegSave:
+    mov esi, OFFSET staffList
+    mov ecx, MAX_STAFF
+
+FindEmptySlot:
+    cmp (Staff PTR [esi]).staffActive, 0
+    je EmptySlotFound
+    add esi, TYPE Staff
+    dec ecx
+    jz EmptySlotDone 
+    jmp FindEmptySlot
+EmptySlotDone:
+    ret                          
+
+EmptySlotFound:
+    mov ebx, esi                 
+
+    mov esi, OFFSET inUser
+    lea edi, (Staff PTR [ebx]).staffUsername
+    call StringCopy
+
+    mov esi, OFFSET inPass
+    lea edi, (Staff PTR [ebx]).staffPassword
+    call StringCopy
+
+    mov (Staff PTR [ebx]).staffActive, 1
+    inc staffCount
+
+    mov edi, OFFSET inPass
+    mov ecx, SIZEOF inPass
+    call SecureZeroMemory
+
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgSuccReg
+    call WriteString
+    call Crlf
+    call WaitMsg
+    ret
+RegisterStaffAccount ENDP
+
+RemoveStaff PROC
+RemStaffStart:
+    call Clrscr
+
+    cmp staffCount, 0
+    jne RemStaffPromptUser
+
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgNoStaffReg
+    call WriteString
+    call WaitMsg
+    ret
+
+RemStaffPromptUser:
+    call ShowStaffTable         
+    call Crlf
+    
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgEnterStaffUserRem
+    call WriteString
+
+    mov edi, OFFSET inUser
+    mov ecx, SIZEOF inUser
+    call SecureZeroMemory
+
+    mov edx, OFFSET inUser
+    mov ecx, SIZEOF inUser
+    call ReadString
+    
+    cmp inUser[0], 0
+    jne RemStaffSearch
+    
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgErrEmpty
+    call WriteString
+    call WaitMsg
+    jmp RemStaffStart
+
+RemStaffSearch:
+    mov ebx, OFFSET staffList
+    mov ecx, MAX_STAFF
+
+RemStaffSearchLoop:
+    push ecx
+    cmp (Staff PTR [ebx]).staffActive, 0
+    je RemStaffSearchNext
+
+    mov esi, OFFSET inUser
+    lea edi, (Staff PTR [ebx]).staffUsername
+    call StringCompare
+    cmp eax, 1
+    je RemStaffFoundPop
+
+RemStaffSearchNext:
+    add ebx, TYPE Staff
+    pop ecx
+    dec ecx
+    jz RemStaffFail
+    jmp RemStaffSearchLoop
+
+RemStaffFail:
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgStaffNotFound
+    call WriteString
+    call WaitMsg
+    jmp RemStaffStart
+
+RemStaffFoundPop:
+    pop ecx
+    mov edi, ebx
+    mov ecx, SIZEOF Staff
+    call SecureZeroMemory
+
+    dec staffCount
+
+    mov eax, currentTheme
+    call SetTextColor
     mov edx, OFFSET msgStaffRemoved
     call WriteString
+    call Crlf
     call WaitMsg
     ret
 RemoveStaff ENDP
 
 UpdateStaff PROC
+UpdStaffStart:
     call Clrscr
-    mov esi, OFFSET staffUser
-    mov edi, OFFSET staffPass
-    call RegisterAccount
+
+    cmp staffCount, 0
+    jne UpdStaffPromptUser
+
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgNoStaffReg
+    call WriteString
+    call WaitMsg
+    ret
+
+UpdStaffPromptUser:
+    call ShowStaffTable         
+    call Crlf
+    
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgEnterStaffUserUpd
+    call WriteString
+
+    mov edi, OFFSET inUser
+    mov ecx, SIZEOF inUser
+    call SecureZeroMemory
+
+    mov edx, OFFSET inUser
+    mov ecx, SIZEOF inUser
+    call ReadString
+    
+    cmp inUser[0], 0
+    jne UpdStaffSearch
+    
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgErrEmpty
+    call WriteString
+    call WaitMsg
+    jmp UpdStaffStart
+
+UpdStaffSearch:
+    mov ebx, OFFSET staffList
+    mov ecx, MAX_STAFF
+
+UpdStaffSearchLoop:
+    push ecx
+    cmp (Staff PTR [ebx]).staffActive, 0
+    je UpdStaffSearchNext
+
+    mov esi, OFFSET inUser
+    lea edi, (Staff PTR [ebx]).staffUsername
+    call StringCompare
+    cmp eax, 1
+    je UpdStaffFoundPop
+
+UpdStaffSearchNext:
+    add ebx, TYPE Staff
+    pop ecx
+    dec ecx
+    jz UpdStaffFail
+    jmp UpdStaffSearchLoop
+
+UpdStaffFail:
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgStaffNotFound
+    call WriteString
+    call WaitMsg
+    jmp UpdStaffStart
+
+UpdStaffFoundPop:
+    pop ecx                       
+
+UpdStaffPromptPass:
+    mov edi, OFFSET inPass
+    mov ecx, SIZEOF inPass
+    call SecureZeroMemory
+
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgRegPass
+    call WriteString
+    mov edx, OFFSET inPass
+    mov ecx, SIZEOF inPass
+    call ReadString
+
+    cmp inPass[0], 0
+    jne UpdStaffSavePass
+
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgErrEmpty
+    call WriteString
+    call WaitMsg
+    call Crlf                   
+    jmp UpdStaffPromptPass
+
+UpdStaffSavePass:
+    mov esi, OFFSET inPass
+    lea edi, (Staff PTR [ebx]).staffPassword
+    call StringCopy
+
+    mov edi, OFFSET inPass
+    mov ecx, SIZEOF inPass
+    call SecureZeroMemory
+
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgStaffUpdated
+    call WriteString
+    call Crlf
+    call WaitMsg
     ret
 UpdateStaff ENDP
 
-
-; ==========================================
-; STAFF SUBROUTINES (STOCK MANAGEMENT)
-; ==========================================
-AddStock PROC
-    call Clrscr
-    call displayCatalog
-
-PromptAddID:
-    mov edx, OFFSET msgPromptShoeID
-    call Crlf
-    call WriteString
-    call ReadInt
-    
-    cmp eax, 1
-    jl InvalidShoe
-    cmp eax, LENGTHOF shoes
-    jg InvalidShoe
-
-    ; Calculate memory offset
-    dec eax
-    mov ebx, TYPE Shoe
-    mul ebx
-    mov esi, OFFSET shoes
-    add esi, eax
-
-PromptAddQty:
-    mov edx, OFFSET msgPromptAddQty
-    call Crlf
-    call WriteString
-    call ReadInt
-
-    ; Validation Check: Must be > 0
-    cmp eax, 0
-    jle InvalidQtyAdd
-
-    add (Shoe PTR [esi]).shoeQuantity, eax
-    mov edx, OFFSET msgStockUpdated
-    call Crlf
-    call WriteString
-    call WaitMsg
-    ret
-
-InvalidQtyAdd:
-    mov edx, OFFSET msgErrC        ; Or custom message: "Quantity must be greater than 0!"
-    call WriteString
-    jmp PromptAddQty
-
-InvalidShoe:
-    mov edx, OFFSET msgErrC
-    call WriteString
-    call WaitMsg
-    ret
-AddStock ENDP
-
-
-RemoveStock PROC
-    call Clrscr
-    call displayCatalog
-
-PromptRemID:
-    mov edx, OFFSET msgPromptShoeID
-    call Crlf
-    call WriteString
-    call ReadInt
-
-    cmp eax, 1
-    jl InvalidShoeRem
-    cmp eax, LENGTHOF shoes
-    jg InvalidShoeRem
-
-    ; Calculate memory offset
-    dec eax
-    mov ebx, TYPE Shoe
-    mul ebx
-    mov esi, OFFSET shoes
-    add esi, eax
-
-PromptRemQty:
-    mov edx, OFFSET msgPromptRemQty
-    call Crlf
-    call WriteString
-    call ReadInt
-
-    ; Validation Check: Must be > 0
-    cmp eax, 0
-    jle InvalidQtyRem
-
-    cmp eax, (Shoe PTR [esi]).shoeQuantity
-    ja StockUnderflow
-    sub (Shoe PTR [esi]).shoeQuantity, eax
-    jmp StockRemDone
-
-StockUnderflow:
-    mov (Shoe PTR [esi]).shoeQuantity, 0
-
-StockRemDone:
-    mov edx, OFFSET msgStockUpdated
-    call Crlf
-    call WriteString
-    call WaitMsg
-    ret
-
-InvalidQtyRem:
-    mov edx, OFFSET msgErrC
-    call WriteString
-    jmp PromptRemQty
-
-InvalidShoeRem:
-    mov edx, OFFSET msgErrC
-    call WriteString
-    call WaitMsg
-    ret
-RemoveStock ENDP
-
-
-UpdateStock PROC
-    call Clrscr
-    call displayCatalog
-
-PromptUpdID:
-    mov edx, OFFSET msgPromptShoeID
-    call Crlf
-    call WriteString
-    call ReadInt
-
-    cmp eax, 1
-    jl InvalidShoeUpd
-    cmp eax, LENGTHOF shoes
-    jg InvalidShoeUpd
-
-    ; Calculate memory offset
-    dec eax
-    mov ebx, TYPE Shoe
-    mul ebx
-    mov esi, OFFSET shoes
-    add esi, eax
-
-PromptUpdQty:
-    mov edx, OFFSET msgPromptNewQty
-    call Crlf
-    call WriteString
-    call ReadInt
-
-    ; Validation Check: Must be > 0
-    cmp eax, 0
-    jle InvalidQtyUpd
-
-    mov (Shoe PTR [esi]).shoeQuantity, eax
-
-PromptUpdPrice:
-    mov edx, OFFSET msgPromptNewPrice
-    call Crlf
-    call WriteString
-    call ReadInt
-
-    ; Validation Check: Price must also be > 0
-    cmp eax, 0
-    jle InvalidPriceUpd
-
-    mov (Shoe PTR [esi]).shoePrice, eax
-
-    mov edx, OFFSET msgStockUpdated
-    call Crlf
-    call WriteString
-    call WaitMsg
-    ret
-
-InvalidQtyUpd:
-    mov edx, OFFSET msgErrC
-    call WriteString
-    jmp PromptUpdQty
-
-InvalidPriceUpd:
-    mov edx, OFFSET msgErrC
-    call WriteString
-    jmp PromptUpdPrice
-
-InvalidShoeUpd:
-    mov edx, OFFSET msgErrC
-    call WriteString
-    call WaitMsg
-    ret
-UpdateStock ENDP
-
-ViewStock PROC
-    call Clrscr
-    call displayCatalog
-    call Crlf
+ShowStaffTable PROC
     mov eax, currentTheme
     call SetTextColor
-    mov edx, OFFSET returnMsg
+    mov edx, OFFSET staffListTitle
     call WriteString
-    call ReadChar
+
+    cmp staffCount, 0
+    jne ShowStaffEntriesHelper
+
+    mov edx, OFFSET staffListEmpty
+    call WriteString
     ret
-ViewStock ENDP
+
+ShowStaffEntriesHelper:
+    mov edx, OFFSET staffListHeader
+    call WriteString
+
+    mov esi, OFFSET staffList
+    mov ecx, MAX_STAFF
+    mov ebx, 1
+
+ViewStaffLoopHelper:
+    push ecx
+    cmp (Staff PTR [esi]).staffActive, 0
+    je SkipStaffDisplayHelper
+
+    mov eax, ebx
+    call WriteDec
+    mov al, '.'
+    call WriteChar
+    mov al, ' '
+    call WriteChar
+    mov al, ' '
+    call WriteChar
+
+    lea edx, (Staff PTR [esi]).staffUsername
+    call WriteString
+
+    lea edx, (Staff PTR [esi]).staffUsername
+    call StrLength
+    mov ecx, 33
+    sub ecx, eax
+PadStaffNameLoopHelper:
+    mov al, ' '
+    call WriteChar
+    loop PadStaffNameLoopHelper
+
+    lea edx, (Staff PTR [esi]).staffPassword
+    call WriteString
+    call Crlf
+
+    inc ebx
+
+SkipStaffDisplayHelper:
+    add esi, TYPE Staff
+    pop ecx
+    dec ecx
+    jz ViewStaffLoopHelperDone
+    jmp ViewStaffLoopHelper
+ViewStaffLoopHelperDone:
+    ret
+ShowStaffTable ENDP
 
 ; ==========================================
 ; 8. ACCOUNT REGISTRATION PROCEDURE
@@ -1138,12 +1479,9 @@ PromptRegUser:
     call SetTextColor
     call Clrscr
     
-    push edi
     mov edi, OFFSET inUser
     mov ecx, SIZEOF inUser
-    mov al, 0
-    rep stosb
-    pop edi
+    call SecureZeroMemory
 
     mov edx, OFFSET msgRegUser
     call WriteString
@@ -1172,19 +1510,15 @@ DoDupCheck:
 PromptRegPass:
     mov edi, pTargetPass
     mov ecx, 30
-    mov al, 0
-    rep stosb
+    call SecureZeroMemory
 
     mov eax, currentTheme
     call SetTextColor
     mov edx, OFFSET msgRegPass
     call WriteString
-    
-    ; --- MASKED INPUT IMPLEMENTATION ---
     mov edx, pTargetPass
     mov ecx, 30
-    call ReadPassword           ; Replaces ReadString to echo '*'
-    ; ----------------------------------
+    call ReadString
     
     mov esi, pTargetPass
     cmp byte ptr [esi], 0
@@ -1195,6 +1529,7 @@ PromptRegPass:
     mov edx, OFFSET msgErrEmpty
     call WriteString
     call WaitMsg
+    call Crlf                   
     jmp PromptRegPass
 
 RegDone:
@@ -1207,58 +1542,6 @@ RegDone:
     ret
 RegisterAccount ENDP
 
-; =========================================================
-; ReadPassword PROC
-; Input:  EDX = offset of buffer
-;         ECX = max buffer length (including null terminator)
-; Output: Password stored in buffer, null-terminated
-; =========================================================
-ReadPassword PROC
-    pushad
-    mov edi, edx                ; EDI points to destination buffer
-    mov ebx, 0                  ; EBX = current character count
-    dec ecx                     ; Reserve space for null terminator
-
-ReadLoop:
-    call ReadChar               ; Read key without auto-echo (AL = ASCII)
-
-    cmp al, 13                  ; Check for ENTER key (ASCII 13)
-    je ReadDone
-
-    cmp al, 8                   ; Check for BACKSPACE key (ASCII 8)
-    je HandleBackspace
-
-    cmp ebx, ecx                ; Check if buffer limit reached
-    jge ReadLoop
-
-    ; Valid character: store and print '*'
-    mov [edi + ebx], al
-    inc ebx
-    mov al, '*'
-    call WriteChar
-    jmp ReadLoop
-
-HandleBackspace:
-    cmp ebx, 0                  ; Nothing to delete if buffer is empty
-    jle ReadLoop
-
-    dec ebx
-    ; Move cursor back, write space to erase '*', move cursor back again
-    mov al, 8
-    call WriteChar
-    mov al, ' '
-    call WriteChar
-    mov al, 8
-    call WriteChar
-    jmp ReadLoop
-
-ReadDone:
-    mov byte ptr [edi + ebx], 0 ; Append null terminator
-    call Crlf
-    popad
-    ret
-ReadPassword ENDP
-
 ; ==========================================
 ; 9. HELPER: CHECK DUPLICATE USERNAME
 ; ==========================================
@@ -1270,19 +1553,39 @@ CheckDuplicateUser PROC
     je DupFound
 
     mov esi, OFFSET inUser
-    mov edi, OFFSET staffUser
-    call StringCompare
-    cmp eax, 1
-    je DupFound
-
-    mov esi, OFFSET inUser
     mov edi, OFFSET memUser
     call StringCompare
     cmp eax, 1
     je DupFound
 
+    mov ebx, OFFSET staffList
+    mov ecx, MAX_STAFF
+
+CheckStaffDupLoop:
+    push ecx
+    cmp (Staff PTR [ebx]).staffActive, 0
+    je SkipStaffDupCheck
+
+    mov esi, OFFSET inUser
+    lea edi, (Staff PTR [ebx]).staffUsername
+    call StringCompare
+    cmp eax, 1
+    je DupFoundPopFirst
+
+SkipStaffDupCheck:
+    add ebx, TYPE Staff
+    pop ecx
+    dec ecx
+    jz CheckStaffDupDone
+    jmp CheckStaffDupLoop
+
+CheckStaffDupDone:
     mov eax, 0
     ret
+
+DupFoundPopFirst:
+    pop ecx
+    jmp DupFound
 
 DupFound:
     mov eax, currentTheme
@@ -1296,20 +1599,45 @@ CheckDuplicateUser ENDP
 
 
 ; ==========================================
-; 10. HELPER: STRING COMPARE
+; UTILITY & HELPER PROCS
 ; ==========================================
+GetSizeOffset PROC
+    sub eax, MIN_SIZE
+    shl eax, 2
+    ret
+GetSizeOffset ENDP
+
+PrintDynamicIDErrMsg PROC
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET errStockID1
+    call WriteString
+    mov eax, NUM_SHOES
+    call WriteDec
+    mov edx, OFFSET errStockID2
+    call WriteString
+    ret
+PrintDynamicIDErrMsg ENDP
+
+SecureZeroMemory PROC
+    push eax
+    mov al, 0
+    rep stosb
+    pop eax
+    ret
+SecureZeroMemory ENDP
+
 StringCompare PROC
 CompareLoop:
     mov al, [esi]
-    mov bl, [edi]
-    cmp al, bl
+    mov dl, [edi]       
+    cmp al, dl
     jne NoMatch
     cmp al, 0
     je Match
     inc esi
     inc edi
     jmp CompareLoop
-
 Match:
     mov eax, 1
     ret
@@ -1318,10 +1646,6 @@ NoMatch:
     ret
 StringCompare ENDP
 
-
-; ==========================================
-; 11. HELPER: STRING COPY
-; ==========================================
 StringCopy PROC
 CopyLoop:
     mov al, [esi]
@@ -1335,156 +1659,695 @@ CopyDone:
     ret
 StringCopy ENDP
 
+ReadValidInt PROC
+    LOCAL rviBuf[16]:BYTE
+    push ebx
+    push edx
+    push esi
+    push edi
 
-; ==========================================
-; 12. HELPER: CLEAR CART BETWEEN TRANSACTIONS
-; ==========================================
-ClearCart PROC
-    ; Clear the normal cart totals.
-    mov esi, OFFSET shoeCart
-    mov ecx, LENGTHOF shoeCart
-ClearLoop:
-    mov (Shoe PTR [esi]).shoeQuantity, 0
-    mov (Shoe PTR [esi]).shoePrice, 0
-    add esi, TYPE Shoe
-    loop ClearLoop
+    lea edi, rviBuf
+    mov ecx, 16
+    mov al, 0
+    rep stosb
+    lea edx, rviBuf
+    mov ecx, 15
+    call ReadString
+    pop edi
 
-    ; Clear the per-size cart quantities.
-    mov esi, OFFSET cartSizeQty
-    mov ecx, LENGTHOF cartSizeQty
-ClearSizeCartLoop:
-    mov DWORD PTR [esi], 0
-    add esi, TYPE DWORD
-    loop ClearSizeCartLoop
+    cmp eax, 0
+    je RVI_Bad
+
+    mov ecx, eax
+    lea esi, rviBuf
+    mov ebx, 0
+RVI_Loop:
+    movzx eax, BYTE PTR [esi]
+    cmp al, '0'
+    jb RVI_Bad
+    cmp al, '9'
+    ja RVI_Bad
+    sub eax, '0'
+    imul ebx, ebx, 10
+    add ebx, eax
+    inc esi
+    
+    dec ecx
+    jz RVI_EndLoop
+    jmp RVI_Loop
+
+RVI_EndLoop:
+    mov eax, ebx
+    mov ecx, 1
+    pop esi
+    pop edx
+    pop ebx
     ret
-ClearCart ENDP
+RVI_Bad:
+    mov eax, 0
+    mov ecx, 0
+    pop esi
+    pop edx
+    pop ebx
+    ret
+ReadValidInt ENDP
+
+; ==========================================
+; INVENTORY / CATALOG MANAGEMENT
+; ==========================================
+AddStock PROC
+    call Clrscr
+    call displayCatalog
+
+PromptAddID:
+    mov edx, OFFSET msgPromptShoeID
+    call Crlf
+    call WriteString
+    mov eax, NUM_SHOES
+    call WriteDec
+    mov edx, OFFSET msgPromptShoeID2
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je AddIDNoOverflow
+
+    call PrintDynamicIDErrMsg
+    jmp PromptAddID
+
+AddIDNoOverflow:
+    cmp eax, 1
+    jl InvalidShoeAdd
+    cmp eax, NUM_SHOES
+    jg InvalidShoeAdd
+    jmp AddIDValid
+
+InvalidShoeAdd:
+    call PrintDynamicIDErrMsg
+    jmp PromptAddID
+
+AddIDValid:
+    dec eax
+    mov ebx, TYPE Shoe
+    mul ebx
+    mov esi, OFFSET shoes
+    add esi, eax                    ; ESI now points to selected Shoe
+
+PromptAddSize:
+    mov edx, OFFSET msgPromptSize
+    call Crlf
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je AddSizeValid
+
+    mov edx, OFFSET errSize
+    call WriteString
+    jmp PromptAddSize
+
+AddSizeValid:
+    cmp eax, MIN_SIZE
+    jl InvalidAddSize
+    cmp eax, MAX_SIZE
+    jg InvalidAddSize
+    mov selectedSize, eax
+    jmp PromptAddQty
+
+InvalidAddSize:
+    mov edx, OFFSET errSize
+    call WriteString
+    jmp PromptAddSize
+
+PromptAddQty:
+    mov edx, OFFSET msgPromptAddQty
+    call Crlf
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je AddQtyNoOverflow
+    mov edx, OFFSET errStockQty
+    call WriteString
+    jmp PromptAddQty
+
+AddQtyNoOverflow:
+    cmp eax, 0
+    jle InvalidQtyAdd
+
+    ; Calculate pointer to exact size array block
+    push eax
+    mov eax, selectedSize
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax]   ; 40 is offset inside STRUCT to where sizes start
+    pop eax
+
+    add [edi], eax
+    mov edx, OFFSET msgStockUpdated
+    call Crlf
+    call WriteString
+    call WaitMsg
+    ret
+
+InvalidQtyAdd:
+    mov edx, OFFSET errStockQty
+    call WriteString
+    jmp PromptAddQty
+AddStock ENDP
+
+RemoveStock PROC
+    call Clrscr
+    call displayCatalog
+
+PromptRemID:
+    mov edx, OFFSET msgPromptShoeID
+    call Crlf
+    call WriteString
+    mov eax, NUM_SHOES
+    call WriteDec
+    mov edx, OFFSET msgPromptShoeID2
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je RemIDNoOverflow
+    
+    call PrintDynamicIDErrMsg
+    jmp PromptRemID
+
+RemIDNoOverflow:
+    cmp eax, 1
+    jl InvalidShoeRem
+    cmp eax, NUM_SHOES
+    jg InvalidShoeRem
+    jmp RemIDValid
+
+InvalidShoeRem:
+    call PrintDynamicIDErrMsg
+    jmp PromptRemID
+
+RemIDValid:
+    dec eax
+    mov ebx, TYPE Shoe
+    mul ebx
+    mov esi, OFFSET shoes
+    add esi, eax
+
+PromptRemSize:
+    mov edx, OFFSET msgPromptSize
+    call Crlf
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je RemSizeValid
+
+    mov edx, OFFSET errSize
+    call WriteString
+    jmp PromptRemSize
+
+RemSizeValid:
+    cmp eax, MIN_SIZE
+    jl InvalidRemSize
+    cmp eax, MAX_SIZE
+    jg InvalidRemSize
+    mov selectedSize, eax
+    jmp PromptRemQty
+
+InvalidRemSize:
+    mov edx, OFFSET errSize
+    call WriteString
+    jmp PromptRemSize
+
+PromptRemQty:
+    mov edx, OFFSET msgPromptRemQty
+    call Crlf
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je RemQtyNoOverflow
+    mov edx, OFFSET errStockQty
+    call WriteString
+    jmp PromptRemQty
+
+RemQtyNoOverflow:
+    cmp eax, 0
+    jle InvalidQtyRem
+
+    push eax
+    mov eax, selectedSize
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax] 
+    pop eax
+
+    cmp eax, [edi]
+    ja InvalidRemoveTooMuch
+
+    sub [edi], eax
+
+    mov edx, OFFSET msgStockUpdated
+    call Crlf
+    call WriteString
+    call WaitMsg
+    ret
+
+InvalidRemoveTooMuch:
+    mov edx, OFFSET errRemoveQty
+    call WriteString
+    jmp PromptRemQty
+
+InvalidQtyRem:
+    mov edx, OFFSET errStockQty
+    call WriteString
+    jmp PromptRemQty
+RemoveStock ENDP
+
+UpdateStock PROC
+    call Clrscr
+    call displayCatalog
+
+PromptUpdID:
+    mov edx, OFFSET msgPromptShoeID
+    call Crlf
+    call WriteString
+    mov eax, NUM_SHOES
+    call WriteDec
+    mov edx, OFFSET msgPromptShoeID2
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je UpdIDNoOverflow
+
+    call PrintDynamicIDErrMsg
+    jmp PromptUpdID
+
+UpdIDNoOverflow:
+    cmp eax, 1
+    jl InvalidShoeUpd
+    cmp eax, NUM_SHOES
+    jg InvalidShoeUpd
+    jmp UpdIDValid
+
+InvalidShoeUpd:
+    call PrintDynamicIDErrMsg
+    jmp PromptUpdID
+
+UpdIDValid:
+    dec eax
+    mov ebx, TYPE Shoe
+    mul ebx
+    mov esi, OFFSET shoes
+    add esi, eax
+
+PromptUpdSize:
+    mov edx, OFFSET msgPromptSize
+    call Crlf
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je UpdSizeValid
+
+    mov edx, OFFSET errSize
+    call WriteString
+    jmp PromptUpdSize
+
+UpdSizeValid:
+    cmp eax, MIN_SIZE
+    jl InvalidUpdSize
+    cmp eax, MAX_SIZE
+    jg InvalidUpdSize
+    mov selectedSize, eax
+    jmp PromptUpdQty
+
+InvalidUpdSize:
+    mov edx, OFFSET errSize
+    call WriteString
+    jmp PromptUpdSize
+
+PromptUpdQty:
+    mov edx, OFFSET msgPromptNewQty
+    call Crlf
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je UpdQtyNoOverflow
+    mov edx, OFFSET errStockQty
+    call WriteString
+    jmp PromptUpdQty
+
+UpdQtyNoOverflow:
+    cmp eax, 0
+    jle InvalidQtyUpd
+
+    push eax
+    mov eax, selectedSize
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax] 
+    pop eax
+
+    mov [edi], eax
+
+PromptUpdPrice:
+    mov edx, OFFSET msgPromptNewPrice
+    call Crlf
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je UpdPriceNoOverflow
+    mov edx, OFFSET errStockQty
+    call WriteString
+    jmp PromptUpdPrice
+
+UpdPriceNoOverflow:
+    cmp eax, 0
+    jle InvalidPriceUpd
+
+    mov (Shoe PTR [esi]).shoePrice, eax
+
+    mov edx, OFFSET msgStockUpdated
+    call Crlf
+    call WriteString
+    call WaitMsg
+    ret
+
+InvalidQtyUpd:
+    mov edx, OFFSET errStockQty
+    call WriteString
+    jmp PromptUpdQty
+
+InvalidPriceUpd:
+    mov edx, OFFSET errStockQty
+    call WriteString
+    jmp PromptUpdPrice
+UpdateStock ENDP
+
+ViewStock PROC
+    call Clrscr
+    call displayCatalog
+    call Crlf
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET returnMsg
+    call WriteString
+    call ReadChar
+    ret
+ViewStock ENDP
+
+; ==========================================
+; RICH TERMINAL CATALOG DISPLAY
+; ==========================================
+displayCatalog PROC
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET header
+    call WriteString
+
+    mov esi, OFFSET shoes        
+    mov ecx, NUM_SHOES     
+    mov bl, 3                    
+
+L1:
+    push ecx
+    mov eax, currentTheme
+    call SetTextColor
+
+    ; ID
+    mov dh, bl                   
+    mov dl, 0
+    call Gotoxy
+    mov eax, (Shoe PTR [esi]).shoeID
+    call WriteDec
+
+    ; Name
+    mov dh, bl
+    mov dl, 4
+    call Gotoxy
+    lea edx, (Shoe PTR [esi]).shoeName   
+    call WriteString
+
+    ; Price
+    mov dh, bl
+    mov dl, 36
+    call Gotoxy
+    mov eax, (Shoe PTR [esi]).shoePrice
+    call WriteDec
+
+    ; Separator
+    mov dh, bl
+    mov dl, 43
+    call Gotoxy
+    mov al, '|'
+    call WriteChar
+
+    ; Iterate over 6 Sizes (40-45)
+    mov ecx, NUM_SIZES
+    mov edi, 0          ; Total sum accumulator
+    lea edx, [esi + 40] ; Start of size arrays offset
+    mov printCol, 45    
+
+PrintSizeLoop:
+    push ecx
+    push edx            
+    
+    mov dh, bl
+    mov dl, printCol    
+    call Gotoxy
+
+    pop edx             
+
+    mov eax, [edx]      
+    add edi, eax        
+
+    cmp eax, 10
+    jge SetGreenQty
+    cmp eax, 3
+    jl SetRedQty
+    mov eax, currentTheme
+    call SetTextColor
+    jmp DoPrintQty
+
+SetGreenQty:
+    mov eax, currentTheme
+    and eax, 0F0h               
+    or  eax, green              
+    call SetTextColor
+    jmp DoPrintQty
+SetRedQty:
+    mov eax, currentTheme
+    and eax, 0F0h               
+    or  eax, lightRed           
+    call SetTextColor
+
+DoPrintQty:
+    mov eax, [edx]
+    call WriteDec
+
+    mov eax, currentTheme
+    call SetTextColor
+
+    add edx, 4          
+    add printCol, 4     
+    
+    pop ecx
+    dec ecx
+    jz PrintSizeLoopDone
+    jmp PrintSizeLoop
+
+PrintSizeLoopDone:
+    mov dh, bl
+    mov dl, 68
+    call Gotoxy
+    mov al, '|'
+    call WriteChar
+
+    mov dh, bl
+    mov dl, 70
+    call Gotoxy
+    mov eax, edi
+    call WriteDec
+
+    inc bl                       
+    add esi, TYPE Shoe
+    
+    pop ecx                     
+    dec ecx
+    jz L1_Done
+    jmp L1                      
+
+L1_Done:
+    mov dh, bl
+    mov dl, 0
+    call Gotoxy
+    mov edx, OFFSET footer
+    call WriteString
+    ret 
+displayCatalog ENDP
 
 
 ; ==========================================
-; 13. GET USER INPUT (SALES MODULE)
+; PURCHASE (INPUT) & CART SYSTEM
 ; ==========================================
 getInput PROC
-
 .REPEAT
+getInputTop:
     mov eax, currentTheme
     call SetTextColor
     call Clrscr
     call displayCatalog
+    call DisplayCart       
 
-; Get shoe ID
 inputID:
-    mov edx, OFFSET getShoeID
+    mov edx, OFFSET getShoeID1
     call Crlf
     call WriteString
-    call ReadInt
-    jno goodInput
+    mov eax, NUM_SHOES
+    call WriteDec
+    mov edx, OFFSET getShoeID2
+    call WriteString
+    mov eax, NUM_SHOES
+    inc eax
+    call WriteDec
+    mov edx, OFFSET getShoeID3
+    call WriteString
+
+    call ReadValidInt
+    cmp ecx, 1
+    je IDReadOK
+    call PrintDynamicIDErrMsg
     jmp inputID
 
-goodInput:
-    cmp eax, LENGTHOF shoes
+IDReadOK:
+    mov ebx, NUM_SHOES
+    inc ebx
+    cmp eax, ebx
+    je GoEditCart
+
+    cmp eax, NUM_SHOES
     jg ErrInput
     cmp eax, 1
     jl ErrInput
     jmp ExitInputID
 
 ErrInput:
-    mov edx, OFFSET errID
-    call WriteString
+    call PrintDynamicIDErrMsg
     jmp inputID
 
-ExitInputID:
-    mov id, eax
+GoEditCart:
+    call EditCart
+    jmp getInputTop
 
-    ; -------------------------------------------------
-    ; Check total remaining stock for the selected shoe.
-    ; Size is tracked separately, but the existing product
-    ; stock quantity remains the overall stock limit.
-    ; -------------------------------------------------
+ExitInputID:
+    mov id, eax     
+
+PromptCartSize:
+    mov edx, OFFSET msgPromptSize
+    call Crlf
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je CartSizeValid
+
+    mov edx, OFFSET errSize
+    call WriteString
+    jmp PromptCartSize
+
+CartSizeValid:
+    cmp eax, MIN_SIZE
+    jl InvalidCartSize
+    cmp eax, MAX_SIZE
+    jg InvalidCartSize
+    mov selectedSize, eax
+    jmp CalculateSizeLimit
+
+InvalidCartSize:
+    mov edx, OFFSET errSize
+    call WriteString
+    jmp PromptCartSize
+
+CalculateSizeLimit:
     mov ebx, id
-    dec ebx
+    dec ebx                         
     mov eax, TYPE Shoe
     mul ebx
-    mov ebx, eax
-
+    mov ebx, eax                    
+    
     mov esi, OFFSET shoes
     add esi, ebx
-    mov eax, (Shoe PTR [esi]).shoeQuantity
-    mov limit, eax
 
-    ; Subtract quantity already in the cart for this product.
+    push ebx
+    mov eax, selectedSize
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax] 
+    mov eax, [edi]                      ; Store Stock
+    pop ebx
+
+    mov limit, eax                  
+    
     mov edi, OFFSET shoeCart
     add edi, ebx
-    mov eax, (Shoe PTR [edi]).shoeQuantity
+
+    push ebx
+    mov eax, selectedSize
+    call GetSizeOffset
+    lea esi, [edi + 40 + eax]
+    mov eax, [esi]                      ; Cart Stock
+    pop ebx
 
     mov edx, limit
-    sub edx, eax
-    mov limit, edx
+    sub edx, eax                  
+    mov limit, edx                  
 
     mov eax, limit
     cmp eax, 0
-    jg inputSize
-
+    jg inputQty
+    
     mov eax, currentTheme
     call SetTextColor
     mov edx, OFFSET errEmpty
     call Crlf
     call WriteString
     call WaitMsg
-    jmp inputID
+    call Crlf                       
+    jmp inputID                     
 
-; -------------------------------------------------
-; Get shoe size
-; -------------------------------------------------
-inputSize:
-    mov edx, OFFSET getShoeSize
-    call Crlf
-    call WriteString
-    call ReadInt
-    jno goodSize
-    jmp inputSize
-
-goodSize:
-    cmp eax, MIN_SHOE_SIZE
-    jl ErrSizeInput
-    cmp eax, MAX_SHOE_SIZE
-    jg ErrSizeInput
-    mov shoeSize, eax
-    jmp inputQty
-
-ErrSizeInput:
-    mov edx, OFFSET errSize
-    call WriteString
-    jmp inputSize
-
-; -------------------------------------------------
-; Get shoe quantity
-; -------------------------------------------------
 inputQty:
     mov edx, OFFSET getShoeQty
     call Crlf
     call WriteString
-    call ReadInt
-    jno goodQty
+    call ReadValidInt
+    cmp ecx, 1
+    je QtyReadOK
+    mov edx, OFFSET errQty
+    call WriteString
     jmp inputQty
 
-goodQty:
+QtyReadOK:
     mov edx, limit
     cmp eax, edx
     jg ErrMsg
     cmp eax, 1
     jl ErrMsg
     jmp ExitInputQty
-
+   
 ErrMsg:
     mov edx, OFFSET errQty
     call WriteString
     jmp inputQty
 
 ExitInputQty:
-    mov qty, eax
+    mov qty, eax    
+    
+    ; Add Cart (Per Size Array Index)
+    mov ebx, id
+    dec ebx                     
+    mov eax, TYPE Shoe
+    mul ebx                     
+    mov ebx, eax
 
-    call calcPrice
-    call addCart
+    mov esi, OFFSET shoeCart
+    add esi, ebx                
+    
+    mov eax, selectedSize
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax]
+
+    mov eax, qty
+    add [edi], eax
 
     mov eax, currentTheme
     call SetTextColor
@@ -1498,187 +2361,329 @@ ExitInputQty:
     ret
 getInput ENDP
 
+ClearCart PROC
+    mov esi, OFFSET shoeCart
+    mov ecx, NUM_SHOES
+ClearLoop:
+    push ecx
+    mov ecx, NUM_SIZES
+    lea edi, [esi + 40]
+ZeroArray:
+    mov DWORD PTR [edi], 0
+    add edi, 4
+    dec ecx
+    jz ZeroArrayDone
+    jmp ZeroArray
+ZeroArrayDone:
 
-; ==========================================
-; 14. DISPLAY PRODUCT CATALOG
-; ==========================================
-displayCatalog PROC
-    mov eax, currentTheme
-    call SetTextColor
-    mov edx, OFFSET header
-    call WriteString
-
-    mov esi, OFFSET shoes        
-    mov ecx, LENGTHOF shoes     
-    mov bl, 3                    
-
-L1:
-    ; Reset default color at start of each line
-    mov eax, currentTheme
-    call SetTextColor
-
-    mov dh, bl                   
-    mov dl, 0
-    call Gotoxy
-    mov eax, (Shoe PTR [esi]).shoeID
-    call WriteDec
-
-    mov dh, bl
-    mov dl, 5
-    call Gotoxy
-    lea edx, (Shoe PTR [esi]).shoeName   
-    call WriteString
-
-    ; --- QUANTITY COLOR LOGIC START ---
-    mov dh, bl
-    mov dl, 39
-    call Gotoxy
-
-    mov eax, (Shoe PTR [esi]).shoeQuantity
-
-    cmp eax, 200
-    jge SetGreenQty
-    cmp eax, 20
-    jl SetRedQty
-
-    ; Default theme color for quantity between 20 and 199
-    mov eax, currentTheme
-    call SetTextColor
-    jmp PrintQty
-
-SetGreenQty:
-    ; Mask background color from currentTheme and apply green text
-    mov eax, currentTheme
-    and eax, 0F0h               ; Preserve background color bits
-    or  eax, green              ; Set foreground to green
-    call SetTextColor
-    jmp PrintQty
-
-SetRedQty:
-    ; Mask background color from currentTheme and apply red text
-    mov eax, currentTheme
-    and eax, 0F0h               ; Preserve background color bits
-    or  eax, lightRed           ; Set foreground to red (or red)
-    call SetTextColor
-
-PrintQty:
-    mov eax, (Shoe PTR [esi]).shoeQuantity
-    call WriteDec
-
-    ; Reset back to user's selected theme color for remaining output
-    mov eax, currentTheme
-    call SetTextColor
-    ; --- QUANTITY COLOR LOGIC END ---
-
-    mov dh, bl
-    mov dl, 50
-    call Gotoxy
-    mov eax, (Shoe PTR [esi]).shoePrice
-    call WriteDec
-
-    inc bl                        
+    pop ecx
     add esi, TYPE Shoe
-
-    dec ecx                     
-    jnz L1                      
-
-    mov dh, bl
-    mov dl, 0
-    call Gotoxy
-    mov edx, OFFSET footer
-    call WriteString
-    ret 
-displayCatalog ENDP
-
-; ==========================================
-; 15. CALCULATE PRICE
-; ==========================================
-calcPrice PROC
-    mov ebx, id
-    dec ebx
-    mov eax, TYPE Shoe
-    mul ebx
-    mov ebx, eax
-
-    mov esi, OFFSET shoes
-    add esi, ebx
-    mov eax, (Shoe PTR [esi]).shoePrice
-    mov price, eax
-
-    mov ebx, qty
-    mul ebx
-    mov price, eax
+    dec ecx
+    jz ClearLoopDone
+    jmp ClearLoop
+ClearLoopDone:
     ret
-calcPrice ENDP
+ClearCart ENDP
 
-
-; ==========================================
-; 16. ADD TO CART
-; ==========================================
-addCart PROC
-    ; -----------------------------------------------
-    ; Update the existing product-level cart totals.
-    ; -----------------------------------------------
-    mov ebx, id
-    dec ebx
-    mov eax, TYPE Shoe
-    mul ebx
-    mov ebx, eax
+DisplayCart PROC
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET cartTitle
+    call WriteString
 
     mov esi, OFFSET shoeCart
-    add esi, ebx
+    mov ecx, NUM_SHOES
+    mov ebx, 0                      ; Tracking total discrete items printed
+    mov currentID, 1
 
-    mov eax, price
-    add (Shoe PTR [esi]).shoePrice, eax
+DisplayCartLoop:
+    push ecx
+    
+    mov ecx, NUM_SIZES
+    mov id, MIN_SIZE                ; recycle id var purely as iterator offset
 
-    mov eax, qty
-    add (Shoe PTR [esi]).shoeQuantity, eax
-
-    ; -----------------------------------------------
-    ; Update the selected product + selected size.
-    ; Index = ((id - 1) * SIZE_COUNT)
-    ;         + (shoeSize - MIN_SHOE_SIZE)
-    ; Each entry is a DWORD.
-    ; -----------------------------------------------
+SizeDisplayLoop:
+    push ecx
     mov eax, id
-    dec eax
-    imul eax, SIZE_COUNT
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax]
+    mov eax, [edi]                  ; Fetch size quantity
+    cmp eax, 0
+    je SkipSizeItem
 
-    mov ebx, shoeSize
-    sub ebx, MIN_SHOE_SIZE
-    add eax, ebx
+    inc ebx
 
-    shl eax, 2
-    mov esi, OFFSET cartSizeQty
-    add esi, eax
+    ; --- Print Item ID ---
+    mov eax, currentID
+    call WriteDec
+    mov edx, OFFSET idSeparator     ; Define this in .data (e.g., idSeparator BYTE ". ", 0)
+    call WriteString
+    ; ----------------------
 
-    mov eax, qty
-    add DWORD PTR [esi], eax
+    lea edx, (Shoe PTR [esi]).shoeName
+    call WriteString
+
+    mov edx, OFFSET szText1
+    call WriteString
+    mov eax, id
+    call WriteDec
+    mov edx, OFFSET szText2
+    call WriteString
+
+    mov edx, OFFSET quantityLabel
+    call WriteString
+    mov eax, [edi]
+    call WriteDec
+
+    mov edx, OFFSET subtotalLabel
+    call WriteString
+    mov eax, (Shoe PTR [esi]).shoePrice
+    mov ecx, [edi]
+    mul ecx                         ; Subtotal = Price * SizeQty
+    mov ecx, CENT
+    mul ecx
+    call DisplayMoney
+    call Crlf
+
+SkipSizeItem:
+    inc id
+    pop ecx
+    dec ecx
+    jz SizeDisplayDone
+    jmp SizeDisplayLoop
+
+SizeDisplayDone:
+    pop ecx
+    add esi, TYPE Shoe
+    inc currentID                   ; <--- Increment ID for the next shoe model
+    dec ecx
+    jz DisplayCartLoopDone
+    jmp DisplayCartLoop
+
+DisplayCartLoopDone:
+    cmp ebx, 0
+    jne CartDone
+    mov edx, OFFSET cartEmptyMsg
+    call WriteString
+
+CartDone:
+    mov edx, OFFSET cartFooter
+    call WriteString
     ret
-addCart ENDP
+DisplayCart ENDP
 
+EditCart PROC
+    LOCAL edCartPtr:DWORD, edStorePtr:DWORD, edLimit:DWORD
+
+EditCartLoop:
+    mov eax, currentTheme
+    call SetTextColor
+    call Clrscr
+    call DisplayCart
+
+    mov edx, OFFSET msgEditCartPrompt
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je EditIDReadOK
+    mov edx, OFFSET msgInvalidEntry
+    call WriteString
+    call WaitMsg
+    jmp EditCartLoop
+
+EditIDReadOK:
+    cmp eax, 0
+    je EditCartDone
+
+    cmp eax, 1
+    jl EditCartBadID
+    cmp eax, NUM_SHOES
+    jg EditCartBadID
+    jmp EditIDValid
+
+EditCartBadID:
+    call PrintDynamicIDErrMsg
+    call WaitMsg
+    jmp EditCartLoop
+
+EditIDValid:
+    dec eax
+    mov ebx, TYPE Shoe
+    mul ebx
+    mov esi, OFFSET shoeCart
+    add esi, eax
+    mov edCartPtr, esi
+
+    mov esi, OFFSET shoes
+    add esi, eax
+    mov edStorePtr, esi
+
+EditPromptSize:
+    mov edx, OFFSET msgEditSizePrompt
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je EditSizeOK
+
+    mov edx, OFFSET msgInvalidEntry
+    call WriteString
+    call WaitMsg
+    jmp EditCartLoop
+
+EditSizeOK:
+    cmp eax, MIN_SIZE
+    jl EditCartBadSize
+    cmp eax, MAX_SIZE
+    jg EditCartBadSize
+    mov selectedSize, eax
+
+    ; Verify if item/size is actually in cart
+    mov esi, edCartPtr
+    mov eax, selectedSize
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax]
+    mov eax, [edi]
+    cmp eax, 0
+    jne EditShowSubMenu
+
+    mov edx, OFFSET msgItemNotInCart
+    call WriteString
+    call WaitMsg
+    jmp EditCartLoop
+
+EditCartBadSize:
+    mov edx, OFFSET errSize
+    call WriteString
+    call WaitMsg
+    jmp EditCartLoop
+
+EditShowSubMenu:
+    mov edx, OFFSET msgEditSubMenu
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je EditSubOK
+    mov edx, OFFSET msgInvalidEntry
+    call WriteString
+    call WaitMsg
+    jmp EditCartLoop
+
+EditSubOK:
+    cmp eax, 1
+    je EditDoUpdateQty
+    cmp eax, 2
+    je EditDoRemove
+    jmp EditCartLoop           
+
+EditDoRemove:
+    mov esi, edCartPtr
+    mov eax, selectedSize
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax]
+    mov DWORD PTR [edi], 0
+    mov edx, OFFSET msgItemRemoved
+    call WriteString
+    call WaitMsg
+    jmp EditCartLoop
+
+EditDoUpdateQty:
+    mov esi, edStorePtr
+    mov eax, selectedSize
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax]
+    mov eax, [edi]   
+    mov edLimit, eax
+
+EditQtyPrompt:
+    mov edx, OFFSET msgPromptNewQty
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    je EditQtyReadOK
+    mov edx, OFFSET errStockQty
+    call WriteString
+    jmp EditQtyPrompt
+
+EditQtyReadOK:
+    cmp eax, 0
+    jle EditQtyBad
+    mov ebx, edLimit
+    cmp eax, ebx
+    jg EditQtyBad
+    jmp EditQtyGood
+
+EditQtyBad:
+    mov edx, OFFSET errStockQty
+    call WriteString
+    jmp EditQtyPrompt
+
+EditQtyGood:
+    mov ecx, eax
+    mov esi, edCartPtr
+    mov eax, selectedSize
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax]
+    mov [edi], ecx
+
+    mov edx, OFFSET msgCartUpdated
+    call WriteString
+    call WaitMsg
+    jmp EditCartLoop
+
+EditCartDone:
+    ret
+EditCart ENDP
 
 ; ==========================================
-; 17. GENERATE INVOICE
+; RECEIPT & FINANCIAL ENGINE
 ; ==========================================
 GenerateInvoice PROC
     mov eax, currentTheme
     call SetTextColor
     call Clrscr
 
-    mov esi, OFFSET shoeCart
-    mov ecx, LENGTHOF shoeCart
     mov eax, 0                  
+    mov esi, OFFSET shoeCart
+    mov ecx, NUM_SHOES
 
 CalcCartTotal:
-    mov ebx, (Shoe PTR [esi]).shoePrice
-    add eax, ebx
-    add esi, TYPE Shoe
-    loop CalcCartTotal
+    push ecx
+    mov ecx, NUM_SIZES
+    mov id, MIN_SIZE
 
+AggregateSizePrice:
+    push ecx
+    mov ebx, id
+    mov eax, ebx
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax]
+    mov ebx, [edi]                  ; Size Quantity
+    cmp ebx, 0
+    je SkipSizeCalc
+
+    mov eax, (Shoe PTR [esi]).shoePrice
+    mul ebx
+    add totalSubtotal, eax          ; Temporary storage logic
+
+SkipSizeCalc:
+    inc id
+    pop ecx
+    dec ecx
+    jz AggregateSizeDone
+    jmp AggregateSizePrice
+
+AggregateSizeDone:
+    pop ecx
+    add esi, TYPE Shoe
+    dec ecx
+    jz CalcCartTotalDone
+    jmp CalcCartTotal
+
+CalcCartTotalDone:
+    mov eax, totalSubtotal
     mov ebx, CENT
     mul ebx
-    mov totalSubtotal, eax
+    mov totalSubtotal, eax          ; Formatted into cents
 
     call CalculateDiscount
     call CalculateTaxableAmount
@@ -1688,10 +2693,6 @@ CalcCartTotal:
     ret
 GenerateInvoice ENDP
 
-
-; ==========================================
-; CALCULATE DISCOUNT
-; ==========================================
 CalculateDiscount PROC
     cmp isMemberUser, 1
     je MemberDiscount
@@ -1710,10 +2711,6 @@ MemberDiscount:
     ret
 CalculateDiscount ENDP
 
-
-; ==========================================
-; CALCULATE TAXABLE AMOUNT
-; ==========================================
 CalculateTaxableAmount PROC
     mov eax, totalSubtotal
     sub eax, discountAmount
@@ -1721,10 +2718,6 @@ CalculateTaxableAmount PROC
     ret
 CalculateTaxableAmount ENDP
 
-
-; ==========================================
-; CALCULATE SST
-; ==========================================
 CalculateSST PROC
     mov eax, taxableAmount
     mov ebx, SST_RATE
@@ -1736,10 +2729,6 @@ CalculateSST PROC
     ret
 CalculateSST ENDP
 
-
-; ==========================================
-; CALCULATE GRAND TOTAL
-; ==========================================
 CalculateGrandTotal PROC
     mov eax, totalSubtotal
     sub eax, discountAmount
@@ -1748,108 +2737,66 @@ CalculateGrandTotal PROC
     ret
 CalculateGrandTotal ENDP
 
-
-; ==========================================
-; DISPLAY INVOICE
-; ==========================================
 DisplayInvoice PROC
     mov edx, OFFSET invoiceTitle
     call WriteString
 
     mov esi, OFFSET shoeCart
-    mov ecx, LENGTHOF shoeCart
+    mov ecx, NUM_SHOES
 
-DisplayInvoiceProductLoop:
+DisplayInvoiceLoop:
     push ecx
-
-    ; Check if overall quantity for product is 0
-    mov eax, (Shoe PTR [esi]).shoeQuantity
-    cmp eax, 0
-    je SkipInvoiceProduct
-
-    ; Calculate pointer to cartSizeQty entry for this shoe ID
-    mov eax, (Shoe PTR [esi]).shoeID
-    dec eax
-    imul eax, SIZE_COUNT
-    shl eax, 2
-    mov edi, OFFSET cartSizeQty
-    add edi, eax
-
-    push esi                        ; Preserve shoeCart pointer
-    mov ecx, SIZE_COUNT
-    mov ebx, MIN_SHOE_SIZE          ; Track current size (5 to 12)
-
-DisplayInvoiceSizeLoop:
-    push ecx                        ; Preserve size loop counter
     
-    mov eax, DWORD PTR [edi]
-    cmp eax, 0
-    je SkipInvoiceSize
+    mov ecx, NUM_SIZES
+    mov id, MIN_SIZE
+InvSizeLoop:
+    push ecx
+    mov eax, id
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax]
+    mov ebx, [edi]
+    cmp ebx, 0
+    je InvSkipItem
 
-    ; Print Shoe Name
     lea edx, (Shoe PTR [esi]).shoeName
     call WriteString
 
-    ; Print Unit Price
-    mov edx, OFFSET priceLabel
+    mov edx, OFFSET szText1
     call WriteString
-    
-    ; Compute Unit Price = (shoePrice / shoeQuantity)
-    mov eax, (Shoe PTR [esi]).shoePrice
-    mov ecx, (Shoe PTR [esi]).shoeQuantity
-    mov edx, 0
-    div ecx                         ; EAX = Unit Price
-    
-    push ebx                        ; 1. Push EBX (Size)
-    push eax                        ; 2. Push EAX (Unit Price)
-    
-    mov ecx, CENT
-    mul ecx
-    call DisplayMoney
-
-    ; Print Shoe Size
-    mov edx, OFFSET sizeLabel
-    call WriteString
-    
-    ; Access pushed EBX on stack without messing up stack order
-    mov eax, [esp + 4]              ; Peek EBX (Size) from stack
+    mov eax, id
     call WriteDec
+    mov edx, OFFSET szText2
+    call WriteString
 
-    ; Print Size Quantity
     mov edx, OFFSET quantityLabel
     call WriteString
-    mov eax, DWORD PTR [edi]
+    mov eax, ebx
     call WriteDec
-
-    ; Print Line Subtotal
+    
     mov edx, OFFSET subtotalLabel
     call WriteString
-    
-    pop eax                         ; 1. Pop EAX (Unit Price)
-    pop ebx                         ; 2. Pop EBX (Size restored cleanly)
-    
-    mov ecx, DWORD PTR [edi]        ; Quantity purchased for THIS size
-    mul ecx                         ; Unit Price * Quantity
+    mov eax, (Shoe PTR [esi]).shoePrice
+    mul ebx
     mov ecx, CENT
     mul ecx
     call DisplayMoney
     call Crlf
 
-SkipInvoiceSize:
-    add edi, TYPE DWORD
-    inc ebx
-    pop ecx
-    dec ecx                         ; Decrement inner loop counter
-    jnz DisplayInvoiceSizeLoop      ; Fixes "jump destination too far" (uses 32-bit jump)
-
-    pop esi                         ; Restore shoeCart pointer
-
-SkipInvoiceProduct:
-    add esi, TYPE Shoe
+InvSkipItem:
+    inc id
     pop ecx
     dec ecx
-    jnz DisplayInvoiceProductLoop
+    jz InvSizeLoopDone
+    jmp InvSizeLoop
 
+InvSizeLoopDone:
+    pop ecx
+    add esi, TYPE Shoe
+    dec ecx
+    jz DisplayInvoiceLoopDone
+    jmp DisplayInvoiceLoop
+
+DisplayInvoiceLoopDone:
     mov edx, OFFSET lineLabel
     call WriteString
 
@@ -1883,9 +2830,45 @@ SkipInvoiceProduct:
     ret
 DisplayInvoice ENDP
 
+ConfirmOrder PROC
+ConfirmLoop:
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET msgConfirmOrder
+    call WriteString
+
+    call ReadChar
+    call WriteChar
+    call Crlf
+
+    cmp al, 'Y'
+    je ConfirmYes
+    cmp al, 'y'
+    je ConfirmYes
+    cmp al, 'N'
+    je ConfirmNo
+    cmp al, 'n'
+    je ConfirmNo
+
+    mov edx, OFFSET invalidConfirmMsg
+    call WriteString
+    jmp ConfirmLoop
+
+ConfirmYes:
+    mov eax, 1
+    ret
+
+ConfirmNo:
+    mov totalSubtotal, 0
+    mov edx, OFFSET msgModifyOrder
+    call WriteString
+    call WaitMsg
+    mov eax, 0
+    ret
+ConfirmOrder ENDP
 
 ; ==========================================
-; 18. PAYMENT & RECEIPT MODULE
+; PAYMENT & TRANSACTIONS
 ; ==========================================
 PaymentReceiptModule PROC
     mov eax, currentTheme
@@ -1903,15 +2886,22 @@ PaymentMenuLoop:
     mov edx, OFFSET paymentMenu
     call WriteString
 
-    call ReadInt
+    call ReadValidInt
+    cmp ecx, 1
+    je PaymentNoOverflow
+    mov eax, currentTheme
+    call SetTextColor
+    mov edx, OFFSET invalidPayment
+    call WriteString
+    jmp PaymentMenuLoop
+
+PaymentNoOverflow:
     mov paymentMethod, eax
 
     cmp eax, CASH
     je ProcessCashPayment
-
     cmp eax, CARD
     je ProcessCardPayment
-
     cmp eax, QR
     je ProcessQRPayment
 
@@ -1932,6 +2922,13 @@ CashPaymentLoop:
     mov ecx, SIZEOF inputBuffer
     call ReadString
 
+    mov al, inputBuffer[0]
+    cmp al, '0'
+    jne CashNotCancelled
+    cmp inputBuffer[1], 0
+    je CashCancelled
+
+CashNotCancelled:
     mov edx, OFFSET inputBuffer
     call ParseRMToCents
 
@@ -1942,7 +2939,11 @@ CashPaymentLoop:
     call SetTextColor
     mov edx, OFFSET invalidAmountMsg
     call WriteString
+    call Crlf                   
     jmp CashPaymentLoop
+
+CashCancelled:
+    jmp PaymentMenuLoop
 
 ValidCashAmount:
     mov amountPaid, eax
@@ -1965,8 +2966,18 @@ ValidCashAmount:
 InsufficientCash:
     mov eax, currentTheme
     call SetTextColor
-    mov edx, OFFSET insufficientMsg
+    mov edx, OFFSET msgSwitchMethod
     call WriteString
+
+    call ReadChar
+    call WriteChar
+    call Crlf
+
+    cmp al, 'C'
+    je CashCancelled
+    cmp al, 'c'
+    je CashCancelled
+    call Crlf                   
     jmp CashPaymentLoop
 
 ProcessCardPayment:
@@ -1976,38 +2987,60 @@ CardNumberLoop:
     mov edx, OFFSET cardNumberMsg
     call WriteString
 
-    ; Read 16-digit card number normally (visible input)
-    mov edx, OFFSET cardNumber
-    mov ecx, SIZEOF cardNumber
-    call ReadString
+    mov esi, OFFSET cardNumber
+    mov ecx, 0
 
-    ; Validate that the buffer contains exactly 16 numeric digits
-    mov edx, OFFSET cardNumber
-    mov ecx, 16
-    call ValidateDigits
+ReadCardDigit:
+    call ReadChar
+    cmp al, 13
+    je CheckCardComplete
+    cmp al, '0'
+    jb InvalidCardInput
+    cmp al, '9'
+    ja InvalidCardInput
 
-    cmp eax, 1
-    je ExpiryInputLoop
+    mov BYTE PTR [esi], al
+    inc esi
+    inc ecx
+    mov al, '*'
+    call WriteChar
+
+    cmp ecx, 16
+    jl ReadCardDigit
+
+WaitForCardEnter:
+    call ReadChar
+    cmp al, 13
+    jne WaitForCardEnter
+
+CheckCardComplete:
+    cmp ecx, 0
+    je CardEntryCancelled
+    cmp ecx, 16
+    jne InvalidCardInput
+
+    mov BYTE PTR [esi], 0
+    call Crlf
+    jmp ExpiryInputLoop
+
+CardEntryCancelled:
+    call Crlf
+    jmp PaymentMenuLoop
 
 InvalidCardInput:
+    call Crlf
     mov eax, currentTheme
     call SetTextColor
     mov edx, OFFSET invalidCardMsg
     call WriteString
+    call Crlf                   
 
-    ; Clear the buffer on invalid input
-    mov esi, OFFSET cardNumber
+    mov edi, OFFSET cardNumber
     mov ecx, SIZEOF cardNumber
-ClearCardBuffer:
-    mov BYTE PTR [esi], 0
-    inc esi
-    loop ClearCardBuffer
+    call SecureZeroMemory
 
     jmp CardNumberLoop
 
-; ==========================================
-; ADDED: EXPIRY DATE VALIDATION LOOP (MM/YY)
-; ==========================================
 ExpiryInputLoop:
     mov eax, currentTheme
     call SetTextColor
@@ -2018,17 +3051,18 @@ ExpiryInputLoop:
     mov ecx, SIZEOF expiryDate
     call ReadString
 
-    ; Call helper procedure to validate MM/YY format & values
     mov edx, OFFSET expiryDate
     call ValidateExpiryDate
 
-    cmp eax, 1                  ; EAX = 1 means valid expiry
+    cmp eax, 1                  
     je CVVLoop
 
+    call Crlf                   
     mov eax, currentTheme
     call SetTextColor
     mov edx, OFFSET invalidExpiryMsg
     call WriteString
+    call Crlf                   
     jmp ExpiryInputLoop
 
 CVVLoop:
@@ -2047,11 +3081,13 @@ CVVLoop:
 
     cmp eax, 1
     je CardPaymentSuccess
-
+    
+    call Crlf                   
     mov eax, currentTheme
     call SetTextColor
     mov edx, OFFSET invalidCVVMsg
     call WriteString
+    call Crlf                   
     jmp CVVLoop
 
 CardPaymentSuccess:
@@ -2073,7 +3109,6 @@ QRPaymentLoop:
     call SetTextColor
     mov edx, OFFSET qrMsg
     call WriteString
-
     mov edx, OFFSET qrLine1
     call WriteString
     mov edx, OFFSET qrLine2
@@ -2116,11 +3151,13 @@ QRPaymentLoop:
     je QRPaymentCancelled
     cmp al, 'n'
     je QRPaymentCancelled
-
+    
+    call Crlf                   
     mov eax, currentTheme
     call SetTextColor
     mov edx, OFFSET invalidQRMsg
     call WriteString
+    call Crlf                   
     jmp QRPaymentLoop
 
 QRPaymentSuccess:
@@ -2145,10 +3182,6 @@ QRPaymentCancelled:
 
 PaymentReceiptModule ENDP
 
-
-; ==========================================
-; 19. PARSE RM STRING TO CENTS
-; ==========================================
 ParseRMToCents PROC
     mov esi, edx
     mov eax, 0
@@ -2215,11 +3248,6 @@ ParseFinished:
     cmp ecx, 0
     je InvalidInput
 
-    cmp ecx, 1
-    jne AddCents
-
-    imul ebx, ebx, 10
-
 AddCents:
     imul eax, eax, 100
     add eax, ebx
@@ -2241,45 +3269,30 @@ InvalidInput:
     ret
 ParseRMToCents ENDP
 
-
-; ==========================================
-; 20. VALIDATE DIGITS HELPER
-; ==========================================
 ValidateDigits PROC
     mov esi, edx
     mov ebx, 0
-
 ValidateLoop:
     mov dl, BYTE PTR [esi]
-
     cmp dl, 0
     je CheckLength
-
     cmp dl, '0'
     jb InvalidDigits
-
     cmp dl, '9'
     ja InvalidDigits
-
     inc ebx
     inc esi
     jmp ValidateLoop
-
 CheckLength:
     cmp ebx, ecx
     jne InvalidDigits
     mov eax, 1
     ret
-
 InvalidDigits:
     mov eax, 0
     ret
 ValidateDigits ENDP
 
-
-; ==========================================
-; 21. GENERATE & PRINT SALES RECEIPT
-; ==========================================
 GenerateReceipt PROC
     mov eax, currentTheme
     call SetTextColor
@@ -2287,120 +3300,98 @@ GenerateReceipt PROC
 
     mov edx, OFFSET receiptTitle
     call WriteString
-
+    
     mov edx, OFFSET productHeader
     call WriteString
     mov edx, OFFSET separatorMsg
     call WriteString
 
     mov esi, OFFSET shoeCart
-    mov ecx, LENGTHOF shoeCart
+    mov ecx, NUM_SHOES
 
-ReceiptProductLoop:
+ReceiptItemLoop:
     push ecx
+    
+    mov ecx, NUM_SIZES
+    mov id, MIN_SIZE
+RcpSizeLoop:
+    push ecx
+    mov eax, id
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax]
+    mov ebx, [edi]
+    cmp ebx, 0
+    je RcpSkipSize
 
-    mov eax, (Shoe PTR [esi]).shoeQuantity
-    cmp eax, 0
-    je SkipReceiptProduct
-
-    mov eax, (Shoe PTR [esi]).shoeID
-    dec eax
-    imul eax, SIZE_COUNT
-    shl eax, 2
-    mov edi, OFFSET cartSizeQty
-    add edi, eax
-
-    push esi                        ; Preserve shoeCart pointer
-    mov ecx, SIZE_COUNT
-    mov ebx, MIN_SHOE_SIZE
-
-ReceiptSizeLoop:
-    push ecx                        ; Preserve size loop counter
-
-    mov eax, DWORD PTR [edi]
-    cmp eax, 0
-    je SkipReceiptSize
-
-; 1. Display Shoe Name
     lea edx, (Shoe PTR [esi]).shoeName
     call WriteString
 
-    ; 2. Pad Shoe Name Column to align with "Size" header (35 chars target)
+    mov edx, OFFSET szText1
+    call WriteString
+    mov eax, id
+    call WriteDec
+    mov edx, OFFSET szText2
+    call WriteString
+
+    ; Pad Shoe Name Column
     lea edx, (Shoe PTR [esi]).shoeName
-    call StrLength
-    mov ecx, 25
+    call StrLength             
+    mov ecx, 32
     sub ecx, eax
 PadNameLoop:
-    cmp ecx, 0
-    jle EndPad
     mov al, ' '
     call WriteChar
-    loop PadNameLoop
+    dec ecx
+    jz PadNameLoopDone
+    jmp PadNameLoop
+PadNameLoopDone:
 
-EndPad:
-    ; 3. Display Size (2 columns width)
-    push ebx                        ; Preserve size counter EBX
-    mov eax, ebx
-    cmp eax, 10
-    jae PrintTwoDigitSize
-    mov al, ' '                     ; Alignment space for single-digit sizes (5-9)
-    call WriteChar
-
-PrintTwoDigitSize:
     mov eax, ebx
     call WriteDec
-    mov al, ' '                     ; Spacing after Size
-    call WriteChar
-    call WriteChar
-
-    ; 4. Display Quantity
-    mov eax, DWORD PTR [edi]
-    call WriteDec
-    mov al, ' '                     ; Spacing after Qty
-    call WriteChar
-    call WriteChar
-    call WriteChar
-
-    ; 5. Calculate and Display Unit Price
-    mov eax, (Shoe PTR [esi]).shoePrice
-    mov ecx, (Shoe PTR [esi]).shoeQuantity
-    mov edx, 0
-    div ecx
-    mov ecx, CENT
-    mul ecx
     
-    push eax                        ; Store unit price on stack for total calculation
+    mov al, ' '
+    call WriteChar
+    call WriteChar
+    call WriteChar
+    call WriteChar
+    call WriteChar
+    call WriteChar
+    call WriteChar
+
+    mov eax, (Shoe PTR [esi]).shoePrice
+    mov ecx, CENT
+    mul ecx                     
     call DisplayMoney
 
-    mov al, ' '                     ; Spacing after Unit Price
+    mov al, ' '
+    call WriteChar
+    call WriteChar
     call WriteChar
     call WriteChar
 
-    ; 6. Calculate and Display Line Total Price
-    pop eax                         ; Restore unit price
-    mov ecx, DWORD PTR [edi]        ; Multiply by quantity for this specific size
-    mul ecx
+    mov eax, (Shoe PTR [esi]).shoePrice
+    mul ebx
+    mov ecx, CENT
+    mul ecx                     
     call DisplayMoney
-
-    pop ebx                         ; Restore correct size counter into EBX
     call Crlf
 
-SkipReceiptSize:
-    add edi, TYPE DWORD
-    inc ebx
-    pop ecx
-    dec ecx                         ; Decrement size loop counter
-    jnz ReceiptSizeLoop             ; Uses 32-bit relative jump (fixes "destination too far")
-
-    pop esi                         ; Restore shoeCart pointer
-
-SkipReceiptProduct:
-    add esi, TYPE Shoe
+RcpSkipSize:
+    inc id
     pop ecx
     dec ecx
-    jnz ReceiptProductLoop
+    jz RcpSizeLoopDone
+    jmp RcpSizeLoop
 
-    ; --- Summary & Payment Section ---
+RcpSizeLoopDone:
+    pop ecx
+    add esi, TYPE Shoe
+    dec ecx
+    jz ReceiptItemLoopDone
+    jmp ReceiptItemLoop
+
+ReceiptItemLoopDone:
+    ; --- Summary Section ---
     mov edx, OFFSET separatorMsg
     call WriteString
 
@@ -2428,6 +3419,7 @@ SkipReceiptProduct:
     mov edx, OFFSET separatorMsg
     call WriteString
 
+    ; --- Payment Details ---
     mov edx, OFFSET paymentMethodMsg
     call WriteString
 
@@ -2465,8 +3457,21 @@ DisplayPaymentAmount:
     mov edx, OFFSET thankYouMsg
     call WriteString
 
-    call RecordTransaction
-    call UpdateStockAfterPurchase
+    ; --- Post-Processing Calls ---
+    call RecordTransaction            
+    call UpdateStockAfterPurchase    
+
+    ; Zero Sensitive Data Before Exiting Receipt Screen
+    mov edi, OFFSET cardNumber
+    mov ecx, SIZEOF cardNumber
+    call SecureZeroMemory
+    mov edi, OFFSET cvvNumber
+    mov ecx, SIZEOF cvvNumber
+    call SecureZeroMemory
+    mov edi, OFFSET expiryDate
+    mov ecx, SIZEOF expiryDate
+    call SecureZeroMemory
+    mov totalSubtotal, 0
 
     mov edx, OFFSET returnMsg
     call WriteString
@@ -2474,11 +3479,10 @@ DisplayPaymentAmount:
     ret
 GenerateReceipt ENDP
 
-
-; ==========================================
-; 22. DISPLAY MONEY IN RM FORMAT
-; ==========================================
 DisplayMoney PROC
+    push ebx
+    push edx
+
     mov ebx, ONE_HUNDRED
     mov edx, 0
     div ebx
@@ -2504,25 +3508,22 @@ DisplayMoney PROC
 DisplayCents:
     mov eax, centAmount
     call WriteDec
+
+    pop edx
+    pop ebx
     ret
 DisplayMoney ENDP
 
-
-; ==========================================
-; 23. RECORD PURCHASE TRANSACTION
-; ==========================================
 RecordTransaction PROC
-    cmp salesCount, MAX_SALES
-    jae RecordFull              ; Ignore if log buffer is maxed out
-
     mov eax, salesCount
     mov ebx, TYPE PurchaseRecord
     mul ebx
     mov esi, OFFSET salesHistory
     add esi, eax
 
-    mov eax, salesCount
+    mov eax, lifetimeTransactions
     inc eax
+    mov lifetimeTransactions, eax
     mov (PurchaseRecord PTR [esi]).transactionID, eax
 
     mov eax, grandTotal
@@ -2532,34 +3533,44 @@ RecordTransaction PROC
     mov (PurchaseRecord PTR [esi]).paymentType, eax
 
     mov edi, OFFSET shoeCart
-    mov ecx, LENGTHOF shoeCart
+    mov ecx, NUM_SHOES
     mov ebx, 0
-
 CountItemsLoop:
-    mov eax, (Shoe PTR [edi]).shoeQuantity
+    push ecx
+    mov ecx, NUM_SIZES
+    lea edx, [edi + 40]
+SumSizesForRec:
+    mov eax, [edx]
     add ebx, eax
-    add edi, TYPE Shoe
-    loop CountItemsLoop
+    add edx, 4
+    dec ecx
+    jz SumSizesForRecDone
+    jmp SumSizesForRec
 
+SumSizesForRecDone:
+    pop ecx
+    add edi, TYPE Shoe
+    dec ecx
+    jz CountItemsLoopDone
+    jmp CountItemsLoop
+
+CountItemsLoopDone:
     mov (PurchaseRecord PTR [esi]).itemCount, ebx
 
     inc salesCount
+    mov eax, salesCount
+    cmp eax, MAX_SALES
+    jb RecordTransactionDone
+    
+    mov salesCount, 0
 
-RecordFull:
+RecordTransactionDone:
     ret
 RecordTransaction ENDP
 
-
-; ==========================================
-; 24. GENERATE & DISPLAY SALES REPORT
-; ==========================================
-; ==========================================
-; GENERATE SALES REPORT (WITH TOTAL PAIRS)
-; ==========================================
 GenerateSalesReport PROC
-    LOCAL totalRev:DWORD, totalPairs:DWORD, countCash:DWORD, countCard:DWORD, countQR:DWORD
+    LOCAL totalRev:DWORD, totalPairs:DWORD, countCash:DWORD, countCard:DWORD, countQR:DWORD, iterLimit:DWORD
     
-    ; 1. Initialize local trackers
     mov totalRev, 0
     mov totalPairs, 0
     mov countCash, 0
@@ -2573,8 +3584,8 @@ GenerateSalesReport PROC
     mov edx, OFFSET reportTitle
     call WriteString
 
-    cmp salesCount, 0
-    jne PrintReportData
+    cmp lifetimeTransactions, 0
+    jne SetupReportLoop
 
     mov edx, OFFSET repNoSales
     call WriteString
@@ -2582,28 +3593,36 @@ GenerateSalesReport PROC
     call WaitMsg
     ret
 
-PrintReportData:
+SetupReportLoop:
     mov edx, OFFSET repHeader
     call WriteString
 
+    mov eax, lifetimeTransactions
+    cmp eax, MAX_SALES
+    jae SetupMaxLoop
+    mov iterLimit, eax
+    jmp StartReportPrint
+
+SetupMaxLoop:
+    mov iterLimit, MAX_SALES
+
+StartReportPrint:
     mov esi, OFFSET salesHistory
-    mov ecx, salesCount
+    mov ecx, iterLimit
 
 ReportLoop:
-    ; Protect main loop counter (ECX) from internal function modifications
     push ecx
 
-    ; --- Column 1: Transaction ID ---
     mov eax, (PurchaseRecord PTR [esi]).transactionID
     call WriteDec
+    
     mov al, ' '
     call WriteChar
     call WriteChar
     call WriteChar
 
-    ; --- Column 2: Item Count (Pairs Sold) ---
     mov eax, (PurchaseRecord PTR [esi]).itemCount
-    add totalPairs, eax             ; Accumulate total pairs sold
+    add totalPairs, eax             
     call WriteDec
     mov al, ' '
     call WriteChar
@@ -2611,7 +3630,6 @@ ReportLoop:
     call WriteChar
     call WriteChar
 
-    ; --- Column 3: Payment Type ---
     mov eax, (PurchaseRecord PTR [esi]).paymentType
     cmp eax, CASH
     je RepIsCash
@@ -2640,30 +3658,27 @@ PrintAmount:
     call WriteChar
     call WriteChar
 
-    ; --- Column 4: Total Amount ---
     mov eax, (PurchaseRecord PTR [esi]).totalAmount
-    add totalRev, eax               ; Accumulate total revenue
+    add totalRev, eax               
     call DisplayMoney
     call Crlf
 
-    ; Advance record pointer and restore loop counter
     add esi, TYPE PurchaseRecord
     pop ecx
-
     dec ecx
-    jnz ReportLoop
+    jz ReportLoopDone
+    jmp ReportLoop
 
-    ; --- Summary Output Section ---
+ReportLoopDone:
     mov edx, OFFSET separatorMsg
     call WriteString
 
     mov edx, OFFSET repTotalTx
     call WriteString
-    mov eax, salesCount
+    mov eax, lifetimeTransactions
     call WriteDec
 
-    ; Display Total Pairs Sold
-    mov edx, OFFSET repTotalPairs    ; Ensure repTotalPairs is defined in .data
+    mov edx, OFFSET repTotalPairs    
     call WriteString
     mov eax, totalPairs
     call WriteDec
@@ -2694,68 +3709,64 @@ PrintAmount:
     ret
 GenerateSalesReport ENDP
 
-; ==========================================
-; 25. UPDATE INVENTORY AFTER PURCHASE
-; ==========================================
 UpdateStockAfterPurchase PROC
     mov esi, OFFSET shoeCart
-    mov ecx, LENGTHOF shoeCart
+    mov edi, OFFSET shoes
+    mov ecx, NUM_SHOES
 
 UpdateLoop:
     push ecx
     
-    ; Check if cart item has quantity purchased
-    mov eax, (Shoe PTR [esi]).shoeQuantity
+    mov ecx, NUM_SIZES
+    lea edx, [esi + 40]         ; cart sizes ptr
+    lea ebx, [edi + 40]         ; store sizes ptr
+
+UpdateSizeLoop:
+    mov eax, [edx]
     cmp eax, 0
     je SkipStockUpdate
 
-    ; Find matching shoe ID in shoes array
-    mov ebx, (Shoe PTR [esi]).shoeID
-    dec ebx                         ; Convert 1-based ID to 0-based index
-    mov eax, TYPE Shoe
-    mul ebx
-    
-    mov edi, OFFSET shoes
-    add edi, eax                    ; EDI points to matching item in 'shoes'
+    cmp eax, [ebx]
+    ja InventoryUnderflow           
 
-    ; Subtract cart quantity from inventory stock
-    mov eax, (Shoe PTR [esi]).shoeQuantity
-    cmp eax, (Shoe PTR [edi]).shoeQuantity
-    ja InventoryUnderflow           ; Guard against underflow
-
-    sub (Shoe PTR [edi]).shoeQuantity, eax
+    sub [ebx], eax
     jmp SkipStockUpdate
 
 InventoryUnderflow:
-    mov (Shoe PTR [edi]).shoeQuantity, 0
+    mov DWORD PTR [ebx], 0
 
 SkipStockUpdate:
-    add esi, TYPE Shoe
-    pop ecx
-    loop UpdateLoop
+    add edx, 4
+    add ebx, 4
+    dec ecx
+    jz UpdateSizeLoopDone
+    jmp UpdateSizeLoop
 
+UpdateSizeLoopDone:
+    pop ecx
+    add esi, TYPE Shoe
+    add edi, TYPE Shoe
+    dec ecx
+    jz UpdateLoopDone
+    jmp UpdateLoop
+
+UpdateLoopDone:
     ret
 UpdateStockAfterPurchase ENDP
 
-; ==========================================
-; 26. VALIDATE EXPIRY DATE (MM/YY)
-; ==========================================
 ValidateExpiryDate PROC
     push esi
     push ebx
     mov esi, edx
 
-    ; 1. Check total length (Must be exactly 5 chars: MM/YY)
     call StrLength
     cmp eax, 5
     jne InvalidExpiry
 
-    ; 2. Check '/' separator at index 2
     mov al, BYTE PTR [esi + 2]
     cmp al, '/'
     jne InvalidExpiry
 
-    ; 3. Validate MM digits (indices 0 & 1)
     mov al, BYTE PTR [esi]
     cmp al, '0'
     jb InvalidExpiry
@@ -2768,21 +3779,19 @@ ValidateExpiryDate PROC
     cmp al, '9'
     ja InvalidExpiry
 
-    ; Convert MM to integer and check range (01 - 12)
     mov al, BYTE PTR [esi]
     sub al, '0'
     mov bl, 10
     mul bl
     mov bl, BYTE PTR [esi + 1]
     sub bl, '0'
-    add al, bl                     ; AL = Month number
+    add al, bl                     
 
     cmp al, 1
     jl InvalidExpiry
     cmp al, 12
     jg InvalidExpiry
 
-    ; 4. Validate YY digits (indices 3 & 4)
     mov al, BYTE PTR [esi + 3]
     cmp al, '0'
     jb InvalidExpiry
@@ -2795,25 +3804,24 @@ ValidateExpiryDate PROC
     cmp al, '9'
     ja InvalidExpiry
 
-    ; Convert YY to integer and check for non-expired year (>= 26)
     mov al, BYTE PTR [esi + 3]
     sub al, '0'
     mov bl, 10
     mul bl
     mov bl, BYTE PTR [esi + 4]
     sub bl, '0'
-    add al, bl                     ; AL = Year number
+    add al, bl                     
 
-    cmp al, 26                     ; Threshold year (2026+)
+    cmp al, 26                     
     jl InvalidExpiry
 
-    mov eax, 1                     ; Valid Expiry
+    mov eax, 1                     
     pop ebx
     pop esi
     ret
 
 InvalidExpiry:
-    mov eax, 0                     ; Invalid Expiry
+    mov eax, 0                     
     pop ebx
     pop esi
     ret
