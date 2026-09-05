@@ -36,6 +36,7 @@ Shoe ENDS
 
 PurchaseRecord STRUCT
     transactionID DWORD ?
+    shoeID        DWORD ?   ; shoeID field
     totalAmount   DWORD ?   ; In Cents
     paymentType   DWORD ?   ; 1=Cash, 2=Card, 3=QR
     itemCount     DWORD ?   ; Total shoe pairs purchased
@@ -224,12 +225,12 @@ Staff ENDS
     reportTitle  BYTE "========================================================", 13, 10
                  BYTE "               ADMIN DASHBOARD - SALES REPORT             ", 13, 10
                  BYTE "========================================================", 13, 10, 0
-    repHeader    BYTE "TX ID     Pairs     Payment      Amount     ", 13, 10
-                 BYTE "--------------------------------------------------------", 13, 10, 0
+    repHeader    BYTE "TX   Qty   Payment            Amount", 0Dh, 0Ah
+                 BYTE "--------------------------------------------------------", 0Dh, 0Ah, 0
     repTotalPairs BYTE 13,10, "Total Pairs Sold             : ",0
     repNoSales   BYTE "No transaction records found.", 13, 10, 0
     repTotalTx   BYTE 13, 10, "Total Transactions Processed : ", 0
-    repTotalRev  BYTE 13, 10, "Total Revenue Collected      : RM", 0
+    repTotalRev  BYTE 13, 10, "Total Revenue Collected      : ", 0
     repCashCount BYTE 13, 10, "Cash Transactions            : ", 0
     repCardCount BYTE 13, 10, "Card Transactions            : ", 0
     repQRCount   BYTE 13, 10, "QR Code Transactions         : ", 0
@@ -3532,17 +3533,34 @@ RecordTransaction PROC
     mov eax, paymentMethod
     mov (PurchaseRecord PTR [esi]).paymentType, eax
 
+    ; --- Extract Shoe ID and Calculate Total Pairs ---
     mov edi, OFFSET shoeCart
     mov ecx, NUM_SHOES
-    mov ebx, 0
+    mov ebx, 0            ; Total pairs counter
+    mov edx, 0            ; Store first matched Shoe ID
+
 CountItemsLoop:
     push ecx
     mov ecx, NUM_SIZES
-    lea edx, [edi + 40]
+    lea eax, [edi + 40]   ; Pointer to size array
+
 SumSizesForRec:
-    mov eax, [edx]
+    push eax
+    mov eax, [eax]
+    cmp eax, 0
+    je SkipShoeIDCapture
+
+    ; Capture shoeID if not already set
+    cmp edx, 0
+    jne KeepShoeID
+    mov edx, (Shoe PTR [edi]).shoeID
+
+KeepShoeID:
     add ebx, eax
-    add edx, 4
+
+SkipShoeIDCapture:
+    pop eax
+    add eax, 4
     dec ecx
     jz SumSizesForRecDone
     jmp SumSizesForRec
@@ -3555,6 +3573,7 @@ SumSizesForRecDone:
     jmp CountItemsLoop
 
 CountItemsLoopDone:
+    mov (PurchaseRecord PTR [esi]).shoeID, edx
     mov (PurchaseRecord PTR [esi]).itemCount, ebx
 
     inc salesCount
@@ -3613,14 +3632,17 @@ StartReportPrint:
 ReportLoop:
     push ecx
 
+    ; 1. Print Transaction ID
     mov eax, (PurchaseRecord PTR [esi]).transactionID
     call WriteDec
-    
     mov al, ' '
     call WriteChar
     call WriteChar
     call WriteChar
+    call WriteChar
 
+
+    ; 2. Print Quantity (itemCount)
     mov eax, (PurchaseRecord PTR [esi]).itemCount
     add totalPairs, eax             
     call WriteDec
@@ -3630,6 +3652,7 @@ ReportLoop:
     call WriteChar
     call WriteChar
 
+    ; 3. Print Payment Method
     mov eax, (PurchaseRecord PTR [esi]).paymentType
     cmp eax, CASH
     je RepIsCash
@@ -3658,6 +3681,17 @@ PrintAmount:
     call WriteChar
     call WriteChar
 
+    mov al, ' '
+    call WriteChar
+    call WriteChar
+    call WriteChar
+
+    mov al, ' '
+    call WriteChar
+    call WriteChar
+    call WriteChar
+
+    ; 4. Print Total Amount
     mov eax, (PurchaseRecord PTR [esi]).totalAmount
     add totalRev, eax               
     call DisplayMoney
