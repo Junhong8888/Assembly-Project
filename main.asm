@@ -176,6 +176,7 @@ Staff ENDS
     cartTitle    BYTE 13,10,"---------------- YOUR CURRENT ORDER ----------------",13,10,0
     cartEmptyMsg BYTE "  (No items added yet)",13,10,0
     cartFooter   BYTE "------------------------------------------------------",13,10,0
+    msgSizeUpdated BYTE "Shoe size successfully updated!", 0Dh, 0Ah, 0
 
     idSeparator BYTE ". ", 0        
     currentID   DWORD ?
@@ -183,9 +184,10 @@ Staff ENDS
     ; Edit cart strings
     msgEditCartPrompt BYTE 13,10,"Enter Item ID in your cart to edit/remove (0 = Back): ",0
     msgEditSizePrompt BYTE "Enter Size to edit (40-45): ",0
-    msgEditSubMenu    BYTE 13,10,"1. Update Quantity",13,10
-                      BYTE "2. Remove Item",13,10
-                      BYTE "3. Back",13,10
+    msgEditSubMenu    BYTE 13,10,"1. Update Size (40-45)",13,10
+                      BYTE "2. Update Quantity",13,10
+                      BYTE "3. Remove Item",13,10
+                      BYTE "4. Back",13,10
                       BYTE "Select option (1-3): ",0
     msgItemNotInCart  BYTE 13,10,"This specific item/size is not currently in your cart.",13,10,0
     msgItemRemoved    BYTE 13,10,"Item removed from cart.",13,10,0
@@ -2571,8 +2573,10 @@ EditShowSubMenu:
 
 EditSubOK:
     cmp eax, 1
-    je EditDoUpdateQty
+    je EditDoUpdateSize
     cmp eax, 2
+    je EditDoUpdateQty
+    cmp eax, 3
     je EditDoRemove
     jmp EditCartLoop           
 
@@ -2594,6 +2598,50 @@ EditDoUpdateQty:
     lea edi, [esi + 40 + eax]
     mov eax, [edi]   
     mov edLimit, eax
+    jmp EditQtyPrompt           ; <-- Redirects control flow directly to quantity prompt
+
+EditDoUpdateSize:
+    ; 1. Store the existing quantity for the old size
+    mov esi, edCartPtr
+    mov eax, selectedSize
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax]
+    mov ebx, [edi]              ; Save existing quantity into EBX
+
+EditNewSizePrompt:
+    ; 2. Prompt for the new shoe size
+    mov edx, OFFSET msgEditSizePrompt
+    call WriteString
+    call ReadValidInt
+    cmp ecx, 1
+    jne EditNewSizeInvalid
+
+    ; 3. Validate new size boundary
+    cmp eax, MIN_SIZE
+    jl EditNewSizeInvalid
+    cmp eax, MAX_SIZE
+    jg EditNewSizeInvalid
+
+    ; 4. Clear old size quantity in cart
+    mov DWORD PTR [edi], 0
+
+    ; 5. Update selectedSize and write saved quantity to new slot
+    mov selectedSize, eax
+    mov esi, edCartPtr
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax]
+    mov [edi], ebx              ; Transfer saved quantity to new size
+
+    mov edx, OFFSET msgCartUpdated 
+    call WriteString
+    call WaitMsg
+    jmp EditCartLoop
+
+EditNewSizeInvalid:
+    mov edx, OFFSET errSize
+    call WriteString
+    call WaitMsg
+    jmp EditNewSizePrompt
 
 EditQtyPrompt:
     mov edx, OFFSET msgPromptNewQty
