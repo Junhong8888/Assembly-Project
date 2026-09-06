@@ -193,6 +193,8 @@ Staff ENDS
     msgItemRemoved    BYTE 13,10,"Item removed from cart.",13,10,0
     msgCartUpdated    BYTE 13,10,"Cart quantity updated.",13,10,0
     msgInvalidEntry   BYTE 13,10,"Invalid input! Numbers only, please try again.",13,10,0
+    msgTargetOccupied BYTE 13,10,"Target size already has items in cart! Clear or change that size first.",13,10,0
+    msgExceedsStock   BYTE 13,10,"Cannot change size! The requested quantity exceeds available stock for that size.",13,10,0
 
     ; Switch method prompt
     msgSwitchMethod BYTE 13,10,"Insufficient funds.",13,10
@@ -260,12 +262,14 @@ Staff ENDS
           Shoe <7, "SOFTRIDE Carson Fresh", 245, 30,30,30,30,30,30>
           Shoe <8, "Deviate NITRO 3", 300, 30,30,30,30,30,30>
 
+    ;Temporary Variable
     id           DWORD ?
     selectedSize DWORD ?
     qty          DWORD ?
     limit        DWORD ?
     printCol     BYTE  ?
 
+    ;Catalog String
     header BYTE "===============================================================================", 13, 10
            BYTE "ID  Shoe Name                      Price   | 40  41  42  43  44  45 | Total", 13, 10
            BYTE "===============================================================================", 13, 10, 0
@@ -372,6 +376,7 @@ Staff ENDS
 
     invalidExpiryMsg BYTE "Invalid Expiry Date! Format must be MM/YY (Month 01-12, Year 26+).",13,10,0
 
+    ;Invoice String
     invoiceTitle BYTE 13,10
                  BYTE "========== INVOICE ==========",13,10,0
 
@@ -391,7 +396,8 @@ Staff ENDS
                     BYTE "Returning to the order screen so you can modify your cart...",13,10,0
     invalidConfirmMsg BYTE 13,10
                        BYTE "Invalid input. Please enter Y or N.",13,10,0
-
+    
+    ;Receipt String
     receiptTitle BYTE 13,10
                  BYTE "==========================================================================",13,10
                  BYTE "                                 MALWH",13,10
@@ -589,6 +595,9 @@ ExitGateway:
     ret
 MainGateway ENDP
 
+; ==========================================
+; Login Portal
+; ==========================================
 LoginPortal PROC
 LoginStart:
     mov eax, currentTheme
@@ -671,6 +680,10 @@ ExitLoginPortal:
     ret
 LoginPortal ENDP
 
+
+; ==========================================
+; Register Portal
+; ==========================================
 RegisterPortal PROC
 RegStart:
     mov eax, currentTheme
@@ -850,6 +863,9 @@ LoginFailed:
     ret
 PerformLogin ENDP
 
+; ==========================================
+; Staff Login
+; ==========================================
 PerformStaffLogin PROC
     mov edi, OFFSET inUser
     mov ecx, SIZEOF inUser
@@ -970,7 +986,7 @@ PerformStaffLogin ENDP
 
 
 ; ==========================================
-; DASHBOARDS
+; Manager DASHBOARDS
 ; ==========================================
 ManagerDashboard PROC
 MgrStart:
@@ -1034,6 +1050,9 @@ MgrExit:
     ret
 ManagerDashboard ENDP
 
+; ==========================================
+; STAFF DASHBOARD
+; ==========================================
 StaffDashboard PROC
 StaffStart:
     mov eax, currentTheme
@@ -1096,6 +1115,9 @@ AddStaff PROC
     ret
 AddStaff ENDP
 
+; ==========================================
+; REGISTER STAFF
+; ==========================================
 RegisterStaffAccount PROC
     cmp staffCount, MAX_STAFF
     jl StaffSlotAvailable
@@ -1202,6 +1224,7 @@ EmptySlotFound:
     ret
 RegisterStaffAccount ENDP
 
+;Remove Staff
 RemoveStaff PROC
 RemStaffStart:
     call Clrscr
@@ -1290,6 +1313,7 @@ RemStaffFoundPop:
     ret
 RemoveStaff ENDP
 
+;Update Staff
 UpdateStaff PROC
 UpdStaffStart:
     call Clrscr
@@ -1406,6 +1430,7 @@ UpdStaffSavePass:
     ret
 UpdateStaff ENDP
 
+;View Staffs
 ShowStaffTable PROC
     mov eax, currentTheme
     call SetTextColor
@@ -1718,6 +1743,8 @@ ReadValidInt ENDP
 ; ==========================================
 ; INVENTORY / CATALOG MANAGEMENT
 ; ==========================================
+
+;Add stock
 AddStock PROC
     call Clrscr
     call displayCatalog
@@ -1815,6 +1842,7 @@ InvalidQtyAdd:
     jmp PromptAddQty
 AddStock ENDP
 
+;Remove Stock
 RemoveStock PROC
     call Clrscr
     call displayCatalog
@@ -1920,6 +1948,7 @@ InvalidQtyRem:
     jmp PromptRemQty
 RemoveStock ENDP
 
+;Update Stock
 UpdateStock PROC
     call Clrscr
     call displayCatalog
@@ -2039,6 +2068,7 @@ InvalidPriceUpd:
     jmp PromptUpdPrice
 UpdateStock ENDP
 
+; View Stock
 ViewStock PROC
     call Clrscr
     call displayCatalog
@@ -2116,9 +2146,9 @@ PrintSizeLoop:
     mov eax, [edx]      
     add edi, eax        
 
-    cmp eax, 10
+    cmp eax, 30         ;Set text color to green if over 30
     jge SetGreenQty
-    cmp eax, 3
+    cmp eax, 10         ;Set text color to red
     jl SetRedQty
     mov eax, currentTheme
     call SetTextColor
@@ -2183,7 +2213,7 @@ displayCatalog ENDP
 
 
 ; ==========================================
-; PURCHASE (INPUT) & CART SYSTEM
+; PURCHASE (INPUT) 
 ; ==========================================
 getInput PROC
 .REPEAT
@@ -2271,6 +2301,12 @@ CalculateSizeLimit:
     
     mov esi, OFFSET shoes
     add esi, ebx
+
+    mov edi, OFFSET shoeCart
+    add edi, ebx
+
+    mov eax, (Shoe PTR [esi]).shoePrice
+    mov (Shoe PTR [edi]).shoePrice, eax
 
     push ebx
     mov eax, selectedSize
@@ -2364,6 +2400,7 @@ ExitInputQty:
     ret
 getInput ENDP
 
+; Clear Cart
 ClearCart PROC
     mov esi, OFFSET shoeCart
     mov ecx, NUM_SHOES
@@ -2388,6 +2425,7 @@ ClearLoopDone:
     ret
 ClearCart ENDP
 
+;Display cart
 DisplayCart PROC
     mov eax, currentTheme
     call SetTextColor
@@ -2475,6 +2513,9 @@ CartDone:
     ret
 DisplayCart ENDP
 
+; ==========================================
+; Manipulate Cart
+; ==========================================
 EditCart PROC
     LOCAL edCartPtr:DWORD, edStorePtr:DWORD, edLimit:DWORD
 
@@ -2601,15 +2642,15 @@ EditDoUpdateQty:
     jmp EditQtyPrompt           ; <-- Redirects control flow directly to quantity prompt
 
 EditDoUpdateSize:
-    ; 1. Store the existing quantity for the old size
+    ; 1. Store existing quantity for current size
     mov esi, edCartPtr
     mov eax, selectedSize
     call GetSizeOffset
     lea edi, [esi + 40 + eax]
-    mov ebx, [edi]              ; Save existing quantity into EBX
+    mov ebx, [edi]              ; Save current quantity in EBX
 
 EditNewSizePrompt:
-    ; 2. Prompt for the new shoe size
+    ; 2. Prompt for target new size
     mov edx, OFFSET msgEditSizePrompt
     call WriteString
     call ReadValidInt
@@ -2622,17 +2663,54 @@ EditNewSizePrompt:
     cmp eax, MAX_SIZE
     jg EditNewSizeInvalid
 
-    ; 4. Clear old size quantity in cart
-    mov DWORD PTR [edi], 0
+    ; Verify that master inventory stock for the target size can accommodate quantity (EBX)
+    push eax
+    call GetSizeOffset
+    mov esi, edStorePtr
+    lea edx, [esi + 40 + eax]   ; Pointer to target size stock in master store
+    pop eax                     ; Restore new size into EAX
+    
+    cmp ebx, [edx]
+    ja EditSizeExceedsStock     ; Reject change if current cart qty exceeds target size stock
 
-    ; 5. Update selectedSize and write saved quantity to new slot
-    mov selectedSize, eax
+    ; Check if target slot in cart is already occupied
+    push eax
+    call GetSizeOffset
     mov esi, edCartPtr
+    lea edx, [esi + 40 + eax]   ; Pointer to target size slot in cart
+    pop eax                     ; Restore new size into EAX
+
+    cmp DWORD PTR [edx], 0
+    jne EditSizeTargetOccupied  ; Reject size change if target size slot in cart is not empty
+
+    ; Clear current size slot in cart
+    mov esi, edCartPtr
+    push eax
+    mov eax, selectedSize
     call GetSizeOffset
     lea edi, [esi + 40 + eax]
-    mov [edi], ebx              ; Transfer saved quantity to new size
+    mov DWORD PTR [edi], 0
+    pop eax
+
+    ; Set selectedSize to new size and assign saved quantity
+    mov selectedSize, eax
+    call GetSizeOffset
+    lea edi, [esi + 40 + eax]
+    mov [edi], ebx              ; Assign saved quantity to new slot
 
     mov edx, OFFSET msgCartUpdated 
+    call WriteString
+    call WaitMsg
+    jmp EditCartLoop
+
+EditSizeTargetOccupied:
+    mov edx, OFFSET msgTargetOccupied
+    call WriteString
+    call WaitMsg
+    jmp EditCartLoop
+
+EditSizeExceedsStock:
+    mov edx, OFFSET msgExceedsStock
     call WriteString
     call WaitMsg
     jmp EditCartLoop
@@ -2742,6 +2820,7 @@ CalcCartTotalDone:
     ret
 GenerateInvoice ENDP
 
+; Calculate Discount
 CalculateDiscount PROC
     cmp isMemberUser, 1
     je MemberDiscount
@@ -2760,6 +2839,7 @@ MemberDiscount:
     ret
 CalculateDiscount ENDP
 
+;Calculate tax
 CalculateTaxableAmount PROC
     mov eax, totalSubtotal
     sub eax, discountAmount
@@ -2778,6 +2858,7 @@ CalculateSST PROC
     ret
 CalculateSST ENDP
 
+;Calculate Grand total
 CalculateGrandTotal PROC
     mov eax, totalSubtotal
     sub eax, discountAmount
@@ -2786,6 +2867,7 @@ CalculateGrandTotal PROC
     ret
 CalculateGrandTotal ENDP
 
+;Display Invoice
 DisplayInvoice PROC
     mov edx, OFFSET invoiceTitle
     call WriteString
@@ -2879,6 +2961,7 @@ DisplayInvoiceLoopDone:
     ret
 DisplayInvoice ENDP
 
+;Ask for Confirm Order
 ConfirmOrder PROC
 ConfirmLoop:
     mov eax, currentTheme
@@ -2960,6 +3043,7 @@ PaymentNoOverflow:
     call WriteString
     jmp PaymentMenuLoop
 
+;Cash Payment
 ProcessCashPayment:
 CashPaymentLoop:
     mov eax, currentTheme
@@ -3029,6 +3113,7 @@ InsufficientCash:
     call Crlf                   
     jmp CashPaymentLoop
 
+;Card Payment
 ProcessCardPayment:
 CardNumberLoop:
     mov eax, currentTheme
@@ -3037,38 +3122,43 @@ CardNumberLoop:
     call WriteString
 
     mov esi, OFFSET cardNumber
-    mov ecx, 0
+    mov ecx, 0                  ; Digits counter
 
 ReadCardDigit:
     call ReadChar
-    cmp al, 13
+    cmp al, 13                 ; Check for Enter key
     je CheckCardComplete
     cmp al, '0'
     jb InvalidCardInput
     cmp al, '9'
     ja InvalidCardInput
 
+    ; --- OVERFLOW PROTECTION & VALIDATION ---
+    cmp ecx, 16                 ; If already at 16 digits and another digit is typed...
+    jae ExceededCardLimit       ; Jump to error directly
+
     mov BYTE PTR [esi], al
     inc esi
     inc ecx
     mov al, '*'
     call WriteChar
+    jmp ReadCardDigit
 
-    cmp ecx, 16
-    jl ReadCardDigit
-
-WaitForCardEnter:
+ExceededCardLimit:
+    ; Consume remaining characters in input stream until user presses Enter (CR)
+FlushCardBuffer:
     call ReadChar
     cmp al, 13
-    jne WaitForCardEnter
+    jne FlushCardBuffer
+    jmp InvalidCardInput
 
 CheckCardComplete:
     cmp ecx, 0
     je CardEntryCancelled
     cmp ecx, 16
-    jne InvalidCardInput
+    jne InvalidCardInput        ; Triggers error if less than 16 digits
 
-    mov BYTE PTR [esi], 0
+    mov BYTE PTR [esi], 0       ; Null-terminate string
     call Crlf
     jmp ExpiryInputLoop
 
@@ -3084,6 +3174,7 @@ InvalidCardInput:
     call WriteString
     call Crlf                   
 
+    ; Clear out the card buffer securely
     mov edi, OFFSET cardNumber
     mov ecx, SIZEOF cardNumber
     call SecureZeroMemory
@@ -3152,6 +3243,7 @@ CardPaymentSuccess:
     call GenerateReceipt
     ret
 
+;QR Payment
 ProcessQRPayment:
 QRPaymentLoop:
     mov eax, currentTheme
@@ -3528,6 +3620,7 @@ DisplayPaymentAmount:
     ret
 GenerateReceipt ENDP
 
+;Display money
 DisplayMoney PROC
     push ebx
     push edx
@@ -3563,6 +3656,7 @@ DisplayCents:
     ret
 DisplayMoney ENDP
 
+;Record Transaction
 RecordTransaction PROC
     mov eax, salesCount
     mov ebx, TYPE PurchaseRecord
@@ -3635,6 +3729,7 @@ RecordTransactionDone:
     ret
 RecordTransaction ENDP
 
+;Generate Sales Report
 GenerateSalesReport PROC
     LOCAL totalRev:DWORD, totalPairs:DWORD, countCash:DWORD, countCard:DWORD, countQR:DWORD, iterLimit:DWORD
     
@@ -3791,6 +3886,7 @@ ReportLoopDone:
     ret
 GenerateSalesReport ENDP
 
+;Update Stock After Purchase
 UpdateStockAfterPurchase PROC
     mov esi, OFFSET shoeCart
     mov edi, OFFSET shoes
@@ -3836,6 +3932,7 @@ UpdateLoopDone:
     ret
 UpdateStockAfterPurchase ENDP
 
+;Validate Card Expiry Date
 ValidateExpiryDate PROC
     push esi
     push ebx
