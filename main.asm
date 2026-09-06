@@ -3323,6 +3323,7 @@ QRPaymentCancelled:
 
 PaymentReceiptModule ENDP
 
+;Convert RM into Cent
 ParseRMToCents PROC
     mov esi, edx
     mov eax, 0
@@ -3410,6 +3411,7 @@ InvalidInput:
     ret
 ParseRMToCents ENDP
 
+;Make user is entering 0-9 digit
 ValidateDigits PROC
     mov esi, edx
     mov ebx, 0
@@ -3434,6 +3436,7 @@ InvalidDigits:
     ret
 ValidateDigits ENDP
 
+;Generate Receipt
 GenerateReceipt PROC
     mov eax, currentTheme
     call SetTextColor
