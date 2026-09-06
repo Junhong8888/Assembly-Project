@@ -188,7 +188,7 @@ Staff ENDS
                       BYTE "2. Update Quantity",13,10
                       BYTE "3. Remove Item",13,10
                       BYTE "4. Back",13,10
-                      BYTE "Select option (1-3): ",0
+                      BYTE "Select option (1-4): ",0
     msgItemNotInCart  BYTE 13,10,"This specific item/size is not currently in your cart.",13,10,0
     msgItemRemoved    BYTE 13,10,"Item removed from cart.",13,10,0
     msgCartUpdated    BYTE 13,10,"Cart quantity updated.",13,10,0
